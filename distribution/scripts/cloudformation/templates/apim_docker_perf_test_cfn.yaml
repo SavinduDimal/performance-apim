@@ -107,17 +107,18 @@
 {% call ec2instance('WSO2APIManagerInstance', 'wso2am', '!Ref WSO2APIManagerInstanceType',
   files=[{'name': 'jdk-11-linux-x64.tar.gz', 'ref': 'JDK11DistributionName'}, {'name': 'mysql-connector-java.jar', 'ref': 'MySQLConnectorJarName'}], volume_size=50) -%}
 /home/ubuntu/setup/setup-apim-docker.sh -j /home/ubuntu/jdk-11-linux-x64.tar.gz \
-  -i "{{ '!Ref APIManagerDockerImage' }}" \
+  -i ${APIManagerDockerImage} \
   -c /home/ubuntu/mysql-connector-java.jar \
   -n ${BackendInstance.PrivateIp} \
   -m ${RDSInstance.Endpoint.Address} \
   -u ${MasterUsername} \
   -p ${MasterUserPassword} \
-  -o ubuntu
+  -o ubuntu \
+  -t JWT
 {%- endcall %}
 # Backend
 {% call ec2instance('BackendInstance', 'backend', '!Ref BackendInstanceType',
-  files=[{'name': 'jdk-8-linux-x64.tar.gz', 'ref': 'OracleJDKDistributionName'}]) -%}
+  files=[{'name': 'jdk-8-linux-x64.tar.gz', 'ref': 'OracleJDKDistributionName'}], volume_size=50) -%}
 /home/ubuntu/setup/setup-netty.sh -g -d /home/ubuntu/jdk-8-linux-x64.tar.gz
 {%- endcall %}
   RDSInstance:
