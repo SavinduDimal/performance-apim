@@ -159,7 +159,7 @@ function setup() {
     pushd ${install_dir}
 
     # Install Docker if not already installed
-    $script_dir/../../common/scripts/docker/install-docker.sh -u $os_user
+    $script_dir/../../performance-common/distribution/scripts/docker/install-docker.sh -u $os_user
 
     # Create directory structure for APIM Docker setup
     sudo -u $os_user mkdir -p wso2am-docker/{conf,logs,repository/database/drivers}
