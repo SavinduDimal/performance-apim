@@ -1,0 +1,148 @@
+# Copyright 2025 WSO2 LLC. (http://wso2.com) All Rights Reserved.
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+{% extends "common_perf_test_cfn.yaml" %}
+{% block parameters -%}
+  APIManagerDockerImage:
+    Description: The WSO2 API Manager Docker Image (e.g., wso2/wso2am:4.5.0-rocky)
+    Type: String
+    Default: wso2/wso2am:4.5.0-rocky
+    ConstraintDescription: must be a valid Docker image format (registry/image:tag)
+  JDK11DistributionName:
+    Description: The name of the 'JDK11 Distribution' in S3 Bucket
+    Type: String
+    ConstraintDescription: must be a valid gz package
+    AllowedPattern: ^.*\.gz$
+  MySQLConnectorJarName:
+    Description: The name of the MySQL Connector Jar in the S3 Backet
+    Type: String
+    ConstraintDescription: must be a valid jar file
+    AllowedPattern: ^.*\.jar$
+  WSO2APIManagerInstanceType:
+    Description: WSO2 API Manager EC2 instance type
+    Type: String
+  BackendInstanceType:
+    Description: Backend EC2 instance type
+    Type: String
+  WSO2APIManagerDBInstanceClass:
+    Description: WSO2 API Manager database instance class for RDS Instance
+    Type: String
+  MasterUsername:
+    Description: Username of RDS DB Instance
+    Type: String
+  MasterUserPassword:
+    Description: Password of RDS DB Instance
+    Type: String
+{%- endblock %}
+{% block resources -%}
+  #Configure second private subnet
+  PrivateSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: 10.0.2.0/24
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ':'
+            - - 'PrivateSubnet2'
+              - !Ref AWS::StackName
+  PrivateSubnet2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+  WSO2APIManagerDBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: "Subnet group for WSO2 API Manager RDS DB"
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+{%- endblock %}
+{% block ec2instances -%}
+# JMeter Client
+{% call ec2instance('JMeterClientInstance', 'jmeter-client', '!Ref JMeterClientInstanceType',
+  files=[{'name': 'apache-jmeter.tgz', 'ref': 'JMeterDistributionName'}, {'name': 'jdk-8-linux-x64.tar.gz', 'ref': 'OracleJDKDistributionName'}],
+  public=True, volume_size=100) -%}
+/home/ubuntu/setup/setup-jmeter-client.sh -g -k /home/ubuntu/private_key.pem \
+  -i /home/ubuntu \
+  -d /home/ubuntu/jdk-8-linux-x64.tar.gz \
+  -f /home/ubuntu/apache-jmeter.tgz \
+  -c /home/ubuntu \
+  {%- if jmeter_servers >= 2 %}
+  {%- for i in range(1, jmeter_servers+1) %}
+  -a jmeter{{ i }} -n ${JMeterServer{{ i }}Instance.PrivateIp} \
+  {%- endfor %}
+  {%- endif %}
+  -a apim -n ${WSO2APIManagerInstance.PrivateIp} \
+  -a netty -n ${BackendInstance.PrivateIp}
+{%- endcall %}
+{%- if jmeter_servers >= 2 %}
+# JMeter Servers
+{%- for i in range(1, jmeter_servers+1) -%}
+{% call ec2instance('JMeterServer' + i|string + 'Instance', 'jmeter-server-' + i|string, '!Ref JMeterServerInstanceType',
+  files=[{'name': 'apache-jmeter.tgz', 'ref': 'JMeterDistributionName'}, {'name': 'jdk-8-linux-x64.tar.gz', 'ref': 'OracleJDKDistributionName'}], volume_size=50) -%}
+/home/ubuntu/setup/setup-jmeter-server.sh -k /home/ubuntu/private_key.pem \
+  -i /home/ubuntu \
+  -d /home/ubuntu/jdk-8-linux-x64.tar.gz \
+  -f /home/ubuntu/apache-jmeter.tgz
+{%- endcall %}
+{%- endfor %}
+{%- endif %}
+# WSO2 API Manager (Docker-based)
+{% call ec2instance('WSO2APIManagerInstance', 'wso2am', '!Ref WSO2APIManagerInstanceType',
+  files=[{'name': 'jdk-11-linux-x64.tar.gz', 'ref': 'JDK11DistributionName'}, {'name': 'mysql-connector-java.jar', 'ref': 'MySQLConnectorJarName'}], volume_size=50) -%}
+/home/ubuntu/setup/setup-apim-docker.sh -j /home/ubuntu/jdk-11-linux-x64.tar.gz \
+  -i "{{ '!Ref APIManagerDockerImage' }}" \
+  -c /home/ubuntu/mysql-connector-java.jar \
+  -n ${BackendInstance.PrivateIp} \
+  -m ${WSO2APIManagerDB.Endpoint.Address} \
+  -u wso2carbon \
+  -p wso2carbon#9762 \
+  -o ubuntu
+{%- endcall %}
+# Backend
+{% call ec2instance('BackendInstance', 'netty', '!Ref BackendInstanceType',
+  files=[{'name': 'jdk-8-linux-x64.tar.gz', 'ref': 'OracleJDKDistributionName'}], volume_size=50) -%}
+/home/ubuntu/setup/setup-netty-service.sh -k /home/ubuntu/private_key.pem \
+  -i /home/ubuntu \
+  -d /home/ubuntu/jdk-8-linux-x64.tar.gz
+{%- endcall %}
+{% endblock %}
+{% block databases -%}
+  WSO2APIManagerDB:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    Properties:
+      DBInstanceIdentifier: !Join
+        - ''
+        - - !Ref AWS::StackName
+          - 'WSO2APIManagerDB'
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      DBSubnetGroupName: !Ref WSO2APIManagerDBSubnetGroup
+      DBInstanceClass: !Ref WSO2APIManagerDBInstanceClass
+      Engine: MySQL
+      DBName: 'WSO2AM_DB'
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      AllocatedStorage: 100
+      DeleteAutomatedBackups: true
+{%- endblock %}
