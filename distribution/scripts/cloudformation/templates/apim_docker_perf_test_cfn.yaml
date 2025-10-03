@@ -98,13 +98,10 @@
 # JMeter Servers
 {%- for i in range(1, jmeter_servers+1) -%}
 {% call ec2instance('JMeterServer' + i|string + 'Instance', 'jmeter-server-' + i|string, '!Ref JMeterServerInstanceType',
-  files=[{'name': 'apache-jmeter.tgz', 'ref': 'JMeterDistributionName'}, {'name': 'jdk-8-linux-x64.tar.gz', 'ref': 'OracleJDKDistributionName'}], volume_size=50) -%}
-/home/ubuntu/setup/setup-jmeter-server.sh -k /home/ubuntu/private_key.pem \
-  -i /home/ubuntu \
-  -d /home/ubuntu/jdk-8-linux-x64.tar.gz \
-  -f /home/ubuntu/apache-jmeter.tgz
+  files = [{'name': 'apache-jmeter.tgz', 'ref': 'JMeterDistributionName'}, {'name': 'jdk-8-linux-x64.tar.gz', 'ref': 'OracleJDKDistributionName'}]) -%}
+/home/ubuntu/setup/setup-jmeter.sh -g -i /home/ubuntu -d /home/ubuntu/jdk-8-linux-x64.tar.gz -f /home/ubuntu/apache-jmeter.tgz
 {%- endcall %}
-{%- endfor %}
+{% endfor -%}
 {%- endif %}
 # WSO2 API Manager (Docker-based)
 {% call ec2instance('WSO2APIManagerInstance', 'wso2am', '!Ref WSO2APIManagerInstanceType',
@@ -113,36 +110,37 @@
   -i "{{ '!Ref APIManagerDockerImage' }}" \
   -c /home/ubuntu/mysql-connector-java.jar \
   -n ${BackendInstance.PrivateIp} \
-  -m ${WSO2APIManagerDB.Endpoint.Address} \
-  -u wso2carbon \
-  -p wso2carbon#9762 \
+  -m ${RDSInstance.Endpoint.Address} \
+  -u ${MasterUsername} \
+  -p ${MasterUserPassword} \
   -o ubuntu
 {%- endcall %}
 # Backend
-{% call ec2instance('BackendInstance', 'netty', '!Ref BackendInstanceType',
-  files=[{'name': 'jdk-8-linux-x64.tar.gz', 'ref': 'OracleJDKDistributionName'}], volume_size=50) -%}
-/home/ubuntu/setup/setup-netty-service.sh -k /home/ubuntu/private_key.pem \
-  -i /home/ubuntu \
-  -d /home/ubuntu/jdk-8-linux-x64.tar.gz
+{% call ec2instance('BackendInstance', 'backend', '!Ref BackendInstanceType',
+  files=[{'name': 'jdk-8-linux-x64.tar.gz', 'ref': 'OracleJDKDistributionName'}]) -%}
+/home/ubuntu/setup/setup-netty.sh -g -d /home/ubuntu/jdk-8-linux-x64.tar.gz
 {%- endcall %}
-{% endblock %}
-{% block databases -%}
-  WSO2APIManagerDB:
-    Type: AWS::RDS::DBInstance
-    DeletionPolicy: Delete
+  RDSInstance:
+    Type: 'AWS::RDS::DBInstance'
     Properties:
-      DBInstanceIdentifier: !Join
-        - ''
-        - - !Ref AWS::StackName
-          - 'WSO2APIManagerDB'
-      VPCSecurityGroups:
-        - !Ref DatabaseSecurityGroup
-      DBSubnetGroupName: !Ref WSO2APIManagerDBSubnetGroup
       DBInstanceClass: !Ref WSO2APIManagerDBInstanceClass
-      Engine: MySQL
-      DBName: 'WSO2AM_DB'
+      AllocatedStorage: '5'
+      Engine: 'MySQL'
+      EngineVersion: '8.0'
+      BackupRetentionPeriod: '0'
       MasterUsername: !Ref MasterUsername
       MasterUserPassword: !Ref MasterUserPassword
-      AllocatedStorage: 100
-      DeleteAutomatedBackups: true
+      MultiAZ: false
+      DBSubnetGroupName: !Ref WSO2APIManagerDBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref InstanceSecurityGroup
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT30M
+    DeletionPolicy: Delete
 {%- endblock %}
+{% block outputs %}
+  JMeterClientPublicIP:
+    Description: JMeter Client Public IP
+    Value: !GetAtt JMeterClientInstance.PublicIp
+{% endblock %}
