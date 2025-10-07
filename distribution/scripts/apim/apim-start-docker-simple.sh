@@ -79,9 +79,11 @@ mkdir -p wso2am-docker/logs
 
 echo "Setting Heap to ${heap_size}"
 
-# Pull the Docker image first
-echo "Pulling Docker image: ${docker_image}..."
-docker pull ${docker_image} || { echo "Failed to pull Docker image"; exit 1; }
+# Verify Docker image exists locally
+if ! docker images --format "table {{.Repository}}:{{.Tag}}" | grep -q "^${docker_image}$"; then
+    echo "Docker image ${docker_image} not found locally, pulling..."
+    docker pull ${docker_image} || { echo "Failed to pull Docker image"; exit 1; }
+fi
 
 # Use simple docker run instead of docker-compose for better reliability
 echo "Starting WSO2 API Manager Docker container using docker run..."

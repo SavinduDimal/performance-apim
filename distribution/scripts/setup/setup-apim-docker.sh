@@ -184,6 +184,10 @@ function setup() {
     # Test Docker Compose installation
     docker-compose --version || { echo "Docker Compose installation verification failed"; exit 1; }
 
+    # Pull WSO2 APIM Docker image early for database initialization
+    echo "$(date): Pre-pulling WSO2 APIM Docker image..."
+    docker pull wso2/wso2am:4.5.0-rocky || { echo "Failed to pull WSO2 APIM Docker image"; exit 1; }
+
     pushd ${install_dir}
 
     # Create directories for APIM configuration

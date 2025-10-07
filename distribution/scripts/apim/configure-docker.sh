@@ -99,10 +99,54 @@ if [[ ! -f $mysql_connector_file ]]; then
     exit 1
 fi
 
-# Execute Queries
+# Execute Queries to create databases
 echo "$(date): Creating Databases. Please make sure MySQL server 5.7 is installed"
 echo "$(date): Connecting to MySQL host: $mysql_host"
 mysql -h $mysql_host -u $mysql_user -p$mysql_password <"$script_dir/sqls/create-databases.sql" || { echo "Failed to create databases"; exit 1; }
+
+# Extract database scripts from Docker image
+echo "$(date): Extracting database scripts from WSO2 APIM Docker image..."
+docker pull wso2/wso2am:4.5.0-rocky || { echo "Failed to pull WSO2 APIM Docker image"; exit 1; }
+
+# Create temporary container to extract database scripts
+temp_container=$(docker create wso2/wso2am:4.5.0-rocky) || { echo "Failed to create temporary container"; exit 1; }
+
+# Extract database scripts with cleanup on failure
+if ! docker cp $temp_container:/home/wso2carbon/wso2am-4.5.0/dbscripts/apimgt/mysql.sql /tmp/apimgt-mysql.sql; then
+    docker rm $temp_container 2>/dev/null || true
+    echo "Failed to extract APIM database script"
+    exit 1
+fi
+
+if ! docker cp $temp_container:/home/wso2carbon/wso2am-4.5.0/dbscripts/mysql.sql /tmp/mysql.sql; then
+    docker rm $temp_container 2>/dev/null || true
+    echo "Failed to extract shared database script"
+    exit 1
+fi
+
+# Clean up temporary container
+docker rm $temp_container || { echo "Warning: Failed to remove temporary container"; }
+
+# Verify database scripts were extracted
+if [[ ! -f /tmp/apimgt-mysql.sql ]]; then
+    echo "APIM database script not found at /tmp/apimgt-mysql.sql"
+    exit 1
+fi
+
+if [[ ! -f /tmp/mysql.sql ]]; then
+    echo "Shared database script not found at /tmp/mysql.sql"
+    exit 1
+fi
+
+# Initialize APIM databases
+echo "$(date): Initializing APIM database schema..."
+echo "$(date): Running APIM database initialization..."
+mysql -h $mysql_host -u $mysql_user -p$mysql_password apim < /tmp/apimgt-mysql.sql || { echo "Failed to initialize APIM database"; exit 1; }
+
+echo "$(date): Running shared database initialization..."
+mysql -h $mysql_host -u $mysql_user -p$mysql_password shared < /tmp/mysql.sql || { echo "Failed to initialize shared database"; exit 1; }
+
+echo "$(date): Database initialization completed successfully"
 
 # Copy configurations after replacing values
 temp_conf=$(mktemp -d /tmp/apim-conf.XXXXXX)
