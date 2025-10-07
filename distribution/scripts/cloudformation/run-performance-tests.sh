@@ -27,6 +27,7 @@ export jdk11_distribution=""
 export mysql_connector_jar=""
 export wso2am_ec2_instance_type=""
 export wso2am_rds_db_instance_class=""
+export docker_image="wso2/wso2am:4.5.0-rocky"
 
 export aws_cloudformation_template_filename="apim_perf_test_cfn.yaml"
 export application_name="WSO2 API Manager"
@@ -35,16 +36,16 @@ export metrics_file_prefix="apim"
 export run_performance_tests_script_name="run-performance-tests.sh"
 
 function usageCommand() {
-    echo "-a <wso2am_distribution> -c <mysql_connector_jar> -A <wso2am_ec2_instance_type> -D <wso2am_rds_db_instance_class> -q <jdk11_distribution>"
+    echo "-c <mysql_connector_jar> -A <wso2am_ec2_instance_type> -D <wso2am_rds_db_instance_class> [-a <wso2am_distribution>] [-q <jdk11_distribution>]"
 }
 export -f usageCommand
 
 function usageHelp() {
-    echo "-a: WSO2 API Manager Distribution."
     echo "-c: MySQL Connector JAR file."
     echo "-A: Amazon EC2 Instance Type for WSO2 API Manager."
     echo "-D: Amazon EC2 DB Instance Class for WSO2 API Manager RDS Instance."
-    echo "-q: JDK 11 Distribution."
+    echo "-a: WSO2 API Manager Distribution (legacy parameter, will be ignored - Docker image wso2/wso2am:4.5.0-rocky will be used)."
+    echo "-q: JDK 11 Distribution (legacy parameter, will be ignored - Docker image includes JDK)."
 
 }
 export -f usageHelp
@@ -53,6 +54,7 @@ while getopts ":u:f:d:k:n:j:o:g:s:b:r:J:S:N:t:p:w:ha:c:A:D:q:" opt; do
     case "${opt}" in
     a)
         wso2am_distribution=${OPTARG}
+        echo "Note: WSO2 APIM zip file parameter detected but will be ignored. Using Docker image: $docker_image"
         ;;
     c)
         mysql_connector_jar=${OPTARG}
@@ -65,6 +67,7 @@ while getopts ":u:f:d:k:n:j:o:g:s:b:r:J:S:N:t:p:w:ha:c:A:D:q:" opt; do
         ;;
     q)
         jdk11_distribution=${OPTARG}
+        echo "Note: JDK 11 distribution parameter detected but will be ignored. Using Docker image: $docker_image"
         ;;
     *)
         opts+=("-${opt}")
@@ -75,22 +78,16 @@ done
 shift "$((OPTIND - 1))"
 
 function validate() {
-    if [[ ! -f $wso2am_distribution ]]; then
-        echo "Please provide WSO2 API Manager distribution."
-        exit 1
+    # Handle backward compatibility - if APIM distribution is provided, show note but continue with Docker
+    if [[ -n $wso2am_distribution ]]; then
+        echo "Note: WSO2 APIM distribution file provided but Docker deployment will be used instead"
+        export wso2am_distribution_filename=$(basename $wso2am_distribution)
     fi
-
-    export wso2am_distribution_filename=$(basename $wso2am_distribution)
-
-    if [[ ! -f $jdk11_distribution ]]; then
-        echo "Please provide jdk11 distribution."
-        exit 1
-    fi
-    export jdk11_distribution_filename=$(basename $jdk11_distribution)
-
-    if [[ ${wso2am_distribution_filename: -4} != ".zip" ]]; then
-        echo "WSO2 API Manager distribution must have .zip extension"
-        exit 1
+    
+    # Handle backward compatibility - if JDK distribution is provided, show note but continue with Docker
+    if [[ -n $jdk11_distribution ]]; then
+        echo "Note: JDK 11 distribution file provided but Docker deployment will be used instead"
+        export jdk11_distribution_filename=$(basename $jdk11_distribution)
     fi
 
     if [[ ! -f $mysql_connector_jar ]]; then
@@ -118,13 +115,19 @@ function validate() {
 export -f validate
 
 function create_links() {
-    wso2am_distribution=$(realpath $wso2am_distribution)
-    jdk11_distribution=$(realpath $jdk11_distribution)
     mysql_connector_jar=$(realpath $mysql_connector_jar)
-    ln -s $wso2am_distribution $temp_dir/$wso2am_distribution_filename
-    ln -s $jdk11_distribution $temp_dir/$jdk11_distribution_filename
     ln -s $mysql_connector_jar $temp_dir/$mysql_connector_jar_filename
     
+    # Handle backward compatibility - create symbolic links if legacy files are provided
+    if [[ -n $wso2am_distribution && -f $wso2am_distribution ]]; then
+        wso2am_distribution=$(realpath $wso2am_distribution)
+        ln -s $wso2am_distribution $temp_dir/$wso2am_distribution_filename
+    fi
+    
+    if [[ -n $jdk11_distribution && -f $jdk11_distribution ]]; then
+        jdk11_distribution=$(realpath $jdk11_distribution)  
+        ln -s $jdk11_distribution $temp_dir/$jdk11_distribution_filename
+    fi
 }
 export -f create_links
 
@@ -136,13 +139,21 @@ function get_test_metadata() {
 export -f get_test_metadata
 
 function get_cf_parameters() {
-    echo "WSO2APIManagerDistributionName=$wso2am_distribution_filename"
-    echo "JDK11DistributionName=$jdk11_distribution_filename"
+    echo "WSO2APIManagerDockerImage=$docker_image"
     echo "MySQLConnectorJarName=$mysql_connector_jar_filename"
     echo "WSO2APIManagerInstanceType=$wso2am_ec2_instance_type"
     echo "WSO2APIManagerDBInstanceClass=$wso2am_rds_db_instance_class"
     echo "MasterUsername=wso2carbon"
     echo "MasterUserPassword=wso2carbon#9762"
+    
+    # Include legacy parameters if they exist (for backward compatibility with templates)
+    if [[ -n $wso2am_distribution_filename ]]; then
+        echo "WSO2APIManagerDistributionName=$wso2am_distribution_filename"
+    fi
+    
+    if [[ -n $jdk11_distribution_filename ]]; then
+        echo "JDK11DistributionName=$jdk11_distribution_filename"
+    fi
 }
 export -f get_cf_parameters
 
