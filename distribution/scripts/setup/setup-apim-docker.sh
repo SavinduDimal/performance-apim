@@ -211,9 +211,15 @@ function setup() {
     echo "$(date): Configuring WSO2 API Manager..."
     sudo -u $os_user $script_dir/../apim/configure-docker.sh -m $mysql_host -u $mysql_user -p $mysql_password -c $mysql_connector_file || { echo "Failed to configure APIM"; exit 1; }
 
-    # Start API Manager using Docker (simple approach)
-    echo "$(date): Starting WSO2 API Manager Docker container..."
-    sudo -u $os_user $script_dir/../apim/apim-start-docker-simple.sh -i $docker_image -m 1G || { echo "Failed to start APIM Docker container"; exit 1; }
+    # Start API Manager using Docker (test first with minimal config)
+    echo "$(date): Testing WSO2 API Manager Docker container startup..."
+    sudo -u $os_user $script_dir/../apim/apim-start-docker-test.sh -i $docker_image -m 2G || { 
+        echo "Basic Docker container test failed, trying with full configuration..."
+        sudo -u $os_user $script_dir/../apim/apim-start-docker-simple.sh -i $docker_image -m 2G || { 
+            echo "Failed to start APIM Docker container"; 
+            exit 1; 
+        }
+    }
 
     # Wait for APIM to start
     echo "Waiting for API Manager to start"

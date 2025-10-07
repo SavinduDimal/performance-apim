@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 # ----------------------------------------------------------------------------
-# Start WSO2 API Manager using Docker (Simple approach)
+# Start WSO2 API Manager using Docker (Ultra-Simple Test)
 # ----------------------------------------------------------------------------
 
 default_heap_size="2G"
@@ -67,32 +67,16 @@ if docker ps -a --format "table {{.Names}}" | grep -q "^wso2am$"; then
     docker rm wso2am || true
 fi
 
-# Clean up log files
-if [ -d wso2am-docker/logs ]; then
-    echo "Log files exist. Moving to /tmp"
-    mv wso2am-docker/logs/* /tmp/ 2>/dev/null || true
-fi
+echo "Starting WSO2 APIM container in test mode (no volumes, no custom env)..."
 
-# Create logs directory
-mkdir -p wso2am-docker/logs
+# Check if we can inspect the container first
+echo "Inspecting WSO2 APIM Docker image..."
+docker run --rm ${docker_image} /bin/bash -c "echo 'Container can start'; java -version; ls -la /home/wso2carbon/wso2am-4.5.0/bin/" || {
+    echo "Container inspection failed"
+    exit 1
+}
 
-echo "Setting Heap to ${heap_size}"
-
-# Verify Docker image exists locally
-if ! docker images --format "table {{.Repository}}:{{.Tag}}" | grep -q "^${docker_image}$"; then
-    echo "Docker image ${docker_image} not found locally, pulling..."
-    docker pull ${docker_image} || { echo "Failed to pull Docker image"; exit 1; }
-fi
-
-# Use simple docker run instead of docker-compose for better reliability
-echo "Starting WSO2 API Manager Docker container using docker run..."
-# Create logs directory with proper permissions
-mkdir -p $(pwd)/wso2am-docker/logs
-chmod 777 $(pwd)/wso2am-docker/logs
-
-echo "Starting WSO2 APIM container with minimal configuration..."
-
-# Start container with minimal configuration to avoid permission and GC logging issues
+# Start the container with absolutely minimal configuration  
 docker run -d \
     --name wso2am \
     --hostname localhost \
@@ -100,33 +84,37 @@ docker run -d \
     -p 9443:9443 \
     -p 8280:8280 \
     -p 8243:8243 \
-    -v $(pwd)/wso2am-docker/repository/conf/deployment.toml:/home/wso2carbon/wso2am-4.5.0/repository/conf/deployment.toml \
-    -v $(pwd)/wso2am-docker/repository/components/lib:/home/wso2carbon/wso2am-4.5.0/repository/components/lib \
     ${docker_image} || { echo "Failed to start Docker container"; exit 1; }
 
-# Wait for container to initialize
-echo "Waiting for container to initialize..."
-sleep 30
-
-echo "Waiting for API Manager to start..."
-exit_status=100
-n=0
-until [ $n -ge 60 ]; do
-    # Check if container is still running
-    if ! docker ps --format "table {{.Names}}" | grep -q "^wso2am$"; then
-        echo "Container stopped unexpectedly. Checking logs..."
-        docker logs wso2am --tail 50
+# Monitor container startup
+for i in {1..6}; do
+    sleep 10
+    echo "Check $i/6: Container status after $((i*10)) seconds..."
+    if docker ps --format "table {{.Names}}\t{{.Status}}" | grep wso2am; then
+        echo "Container is running"
+    else
+        echo "Container stopped or not found. Checking logs..."
+        docker logs wso2am --tail 20
         exit 1
     fi
-    
-    response_code="$(curl -sk -w "%{http_code}" -o /dev/null https://localhost:8243/services/Version || echo "")"
+done
+
+echo "Container appears stable after 60 seconds"
+
+echo "Container is running. Checking APIM readiness..."
+
+# Check if APIM is responding (shorter timeout for test)
+exit_status=100
+n=0
+until [ $n -ge 20 ]; do
+    response_code="$(curl -sk -w "%{http_code}" -o /dev/null https://localhost:8243/services/Version || echo "000")"
     if [ "$response_code" = "200" ]; then
-        echo "API Manager started successfully"
+        echo "API Manager started successfully in test mode!"
         exit_status=0
         break
     fi
-    echo "Waiting for APIM to respond... (attempt $((n+1))/60, response: $response_code)"
-    sleep 10
+    echo "Waiting for APIM to respond... (attempt $((n+1))/20, response: $response_code)"
+    sleep 15
     n=$(($n + 1))
 done
 
@@ -134,12 +122,10 @@ if [ $exit_status -ne 0 ]; then
     echo "API Manager failed to start within expected time"
     echo "Container status:"
     docker ps -a | grep wso2am || echo "Container not found"
-    echo "Container logs:"
+    echo "Container logs (last 50 lines):"
     docker logs wso2am --tail 50
     exit 1
 fi
 
-# Wait for another 10 seconds to make sure that the server is ready to accept API requests.
-sleep 10
-echo "WSO2 API Manager is ready to accept requests"
+echo "WSO2 API Manager test startup completed successfully!"
 exit $exit_status
