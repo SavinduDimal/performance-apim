@@ -100,8 +100,9 @@ if [[ ! -f $mysql_connector_file ]]; then
 fi
 
 # Execute Queries
-echo "Creating Databases. Please make sure MySQL server 5.7 is installed"
-mysql -h $mysql_host -u $mysql_user -p$mysql_password <"$script_dir/sqls/create-databases.sql"
+echo "$(date): Creating Databases. Please make sure MySQL server 5.7 is installed"
+echo "$(date): Connecting to MySQL host: $mysql_host"
+mysql -h $mysql_host -u $mysql_user -p$mysql_password <"$script_dir/sqls/create-databases.sql" || { echo "Failed to create databases"; exit 1; }
 
 # Copy configurations after replacing values
 temp_conf=$(mktemp -d /tmp/apim-conf.XXXXXX)
@@ -116,8 +117,19 @@ replace_value $temp_conf mysql_password $mysql_password
 # Copy configuration to docker directory
 apim_docker_path="wso2am-docker"
 if [[ -d $apim_docker_path ]]; then
-    cp -rv $temp_conf/conf/* ${apim_docker_path}/repository/conf/
-    cp -v $mysql_connector_file ${apim_docker_path}/repository/components/lib/
+    echo "$(date): Copying configuration files..."
+    cp -rv $temp_conf/conf/* ${apim_docker_path}/repository/conf/ || { echo "Failed to copy configuration files"; exit 1; }
+    echo "$(date): Copying MySQL connector JAR..."
+    cp -v $mysql_connector_file ${apim_docker_path}/repository/components/lib/ || { echo "Failed to copy MySQL connector"; exit 1; }
+    
+    # Verify MySQL connector was copied
+    if [[ ! -f ${apim_docker_path}/repository/components/lib/$(basename $mysql_connector_file) ]]; then
+        echo "MySQL connector file not found in lib directory"
+        exit 1
+    fi
+else
+    echo "APIM Docker directory not found: $apim_docker_path"
+    exit 1
 fi
 
 # Create deployment.toml for Docker

@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 # ----------------------------------------------------------------------------
-# Start WSO2 API Manager using Docker
+# Start WSO2 API Manager using Docker (Simple approach)
 # ----------------------------------------------------------------------------
 
 default_heap_size="2G"
@@ -83,39 +83,23 @@ echo "Setting Heap to ${heap_size}"
 echo "Pulling Docker image: ${docker_image}..."
 docker pull ${docker_image} || { echo "Failed to pull Docker image"; exit 1; }
 
-# Create docker-compose.yml for easier management
-echo "Creating Docker Compose configuration..."
-cat > docker-compose.yml << EOF
-version: '3.8'
-services:
-  wso2am:
-    image: ${docker_image}
-    container_name: wso2am
-    hostname: localhost
-    ports:
-      - "9763:9763"
-      - "9443:9443"
-      - "8280:8280"
-      - "8243:8243"
-    volumes:
-      - ./wso2am-docker/repository/conf/deployment.toml:/home/wso2carbon/wso2am-4.5.0/repository/conf/deployment.toml:ro
-      - ./wso2am-docker/repository/components/lib:/home/wso2carbon/wso2am-4.5.0/repository/components/lib:ro
-      - ./wso2am-docker/logs:/home/wso2carbon/wso2am-4.5.0/repository/logs
-    environment:
-      - JAVA_OPTS=-Xms${heap_size} -Xmx${heap_size} -Xlog:gc*,safepoint,gc+heap=trace:file=/home/wso2carbon/wso2am-4.5.0/repository/logs/gc.log:uptime,utctime,level,tags
-    restart: unless-stopped
-    networks:
-      - wso2am-network
+# Use simple docker run instead of docker-compose for better reliability
+echo "Starting WSO2 API Manager Docker container using docker run..."
+docker run -d \
+    --name wso2am \
+    --hostname localhost \
+    -p 9763:9763 \
+    -p 9443:9443 \
+    -p 8280:8280 \
+    -p 8243:8243 \
+    -v $(pwd)/wso2am-docker/repository/conf/deployment.toml:/home/wso2carbon/wso2am-4.5.0/repository/conf/deployment.toml:ro \
+    -v $(pwd)/wso2am-docker/repository/components/lib:/home/wso2carbon/wso2am-4.5.0/repository/components/lib:ro \
+    -v $(pwd)/wso2am-docker/logs:/home/wso2carbon/wso2am-4.5.0/repository/logs \
+    -e JAVA_OPTS="-Xms${heap_size} -Xmx${heap_size} -Xlog:gc*,safepoint,gc+heap=trace:file=/home/wso2carbon/wso2am-4.5.0/repository/logs/gc.log:uptime,utctime,level,tags" \
+    --restart unless-stopped \
+    ${docker_image} || { echo "Failed to start Docker container"; exit 1; }
 
-networks:
-  wso2am-network:
-    driver: bridge
-EOF
-
-echo "Starting WSO2 API Manager Docker container..."
-docker-compose up -d || { echo "Failed to start Docker container"; exit 1; }
-
-# Wait a bit for container to initialize
+# Wait for container to initialize
 echo "Waiting for container to initialize..."
 sleep 30
 
@@ -123,18 +107,28 @@ echo "Waiting for API Manager to start..."
 exit_status=100
 n=0
 until [ $n -ge 60 ]; do
+    # Check if container is still running
+    if ! docker ps --format "table {{.Names}}" | grep -q "^wso2am$"; then
+        echo "Container stopped unexpectedly. Checking logs..."
+        docker logs wso2am --tail 50
+        exit 1
+    fi
+    
     response_code="$(curl -sk -w "%{http_code}" -o /dev/null https://localhost:8243/services/Version || echo "")"
-    if [ $response_code -eq 200 ]; then
+    if [ "$response_code" = "200" ]; then
         echo "API Manager started successfully"
         exit_status=0
         break
     fi
+    echo "Waiting for APIM to respond... (attempt $((n+1))/60, response: $response_code)"
     sleep 10
     n=$(($n + 1))
 done
 
 if [ $exit_status -ne 0 ]; then
     echo "API Manager failed to start within expected time"
+    echo "Container status:"
+    docker ps -a | grep wso2am || echo "Container not found"
     echo "Container logs:"
     docker logs wso2am --tail 50
     exit 1

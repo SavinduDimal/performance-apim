@@ -141,41 +141,75 @@ function setup() {
     install_dir=/home/$os_user
 
     # Install Docker
-    echo "Installing Docker..."
-    apt-get update
-    apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+    echo "$(date): Starting Docker installation..."
     
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+    # Update package list
+    apt-get update || { echo "Failed to update package list"; exit 1; }
     
+    # Install prerequisites
+    apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release || { echo "Failed to install prerequisites"; exit 1; }
+    
+    # Add Docker's official GPG key
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg || { echo "Failed to add Docker GPG key"; exit 1; }
+    
+    # Add Docker repository
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
     
-    apt-get update
-    apt-get install -y docker-ce docker-ce-cli containerd.io
+    # Update package list with Docker repository
+    apt-get update || { echo "Failed to update package list after adding Docker repo"; exit 1; }
+    
+    # Install Docker
+    apt-get install -y docker-ce docker-ce-cli containerd.io || { echo "Failed to install Docker"; exit 1; }
     
     # Add user to docker group
     usermod -aG docker $os_user
     
     # Start Docker service
-    systemctl start docker
-    systemctl enable docker
+    systemctl start docker || { echo "Failed to start Docker service"; exit 1; }
+    systemctl enable docker || { echo "Failed to enable Docker service"; exit 1; }
+    
+    # Wait for Docker to be ready
+    echo "$(date): Waiting for Docker to be ready..."
+    sleep 10
+    
+    # Test Docker installation
+    docker --version || { echo "Docker installation verification failed"; exit 1; }
     
     # Install Docker Compose
-    curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    echo "$(date): Installing Docker Compose..."
+    curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose || { echo "Failed to download Docker Compose"; exit 1; }
     chmod +x /usr/local/bin/docker-compose
     ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+    
+    # Test Docker Compose installation
+    docker-compose --version || { echo "Docker Compose installation verification failed"; exit 1; }
 
     pushd ${install_dir}
 
     # Create directories for APIM configuration
-    sudo -u $os_user mkdir -p wso2am-docker/repository/conf
-    sudo -u $os_user mkdir -p wso2am-docker/repository/components/lib
-    sudo -u $os_user mkdir -p wso2am-docker/repository/deployment/server/synapse-configs/default/sequences
+    echo "$(date): Creating APIM configuration directories..."
+    sudo -u $os_user mkdir -p wso2am-docker/repository/conf || { echo "Failed to create conf directory"; exit 1; }
+    sudo -u $os_user mkdir -p wso2am-docker/repository/components/lib || { echo "Failed to create lib directory"; exit 1; }
+    sudo -u $os_user mkdir -p wso2am-docker/repository/deployment/server/synapse-configs/default/sequences || { echo "Failed to create sequences directory"; exit 1; }
+
+    # Wait for MySQL to be ready
+    echo "$(date): Waiting for MySQL database to be ready..."
+    for i in {1..30}; do
+        if mysql -h $mysql_host -u $mysql_user -p$mysql_password -e "SELECT 1;" >/dev/null 2>&1; then
+            echo "$(date): MySQL database is ready"
+            break
+        fi
+        echo "$(date): Waiting for MySQL... (attempt $i/30)"
+        sleep 10
+    done
 
     # Configure WSO2 API Manager
-    sudo -u $os_user $script_dir/../apim/configure-docker.sh -m $mysql_host -u $mysql_user -p $mysql_password -c $mysql_connector_file
+    echo "$(date): Configuring WSO2 API Manager..."
+    sudo -u $os_user $script_dir/../apim/configure-docker.sh -m $mysql_host -u $mysql_user -p $mysql_password -c $mysql_connector_file || { echo "Failed to configure APIM"; exit 1; }
 
-    # Start API Manager using Docker
-    sudo -u $os_user $script_dir/../apim/apim-start-docker.sh -i $docker_image -m 1G
+    # Start API Manager using Docker (simple approach)
+    echo "$(date): Starting WSO2 API Manager Docker container..."
+    sudo -u $os_user $script_dir/../apim/apim-start-docker-simple.sh -i $docker_image -m 1G || { echo "Failed to start APIM Docker container"; exit 1; }
 
     # Wait for APIM to start
     echo "Waiting for API Manager to start"
@@ -227,5 +261,17 @@ function setup() {
     echo "Completed API Manager Docker setup..."
 }
 export -f setup
+
+# Log all output to a file for debugging
+exec 1> >(tee -a /var/log/apim-docker-setup.log)
+exec 2> >(tee -a /var/log/apim-docker-setup.log >&2)
+
+echo "$(date): Starting APIM Docker setup with parameters:"
+echo "  Docker image: $docker_image"
+echo "  MySQL host: $mysql_host"
+echo "  MySQL user: $mysql_user"
+echo "  Netty host: $netty_host"
+echo "  OS user: $os_user"
+echo "  Token type: $token_type"
 
 $script_dir/setup-common.sh "${opts[@]}" "$@" -p curl -p jq -p mysql-client
