@@ -99,17 +99,24 @@ if [[ ! -f $mysql_connector_file ]]; then
     exit 1
 fi
 
-# Execute Queries to create databases
-echo "$(date): Creating Databases. Please make sure MySQL server 5.7 is installed"
-echo "$(date): Connecting to MySQL host: $mysql_host"
-mysql -h $mysql_host -u $mysql_user -p$mysql_password <"$script_dir/sqls/create-databases.sql" || { echo "Failed to create databases"; exit 1; }
+# Clean up any previous database scripts
+rm -f /tmp/apimgt-mysql.sql /tmp/mysql.sql
 
-# Extract database scripts from Docker image
+# Extract database scripts from Docker image first
 echo "$(date): Extracting database scripts from WSO2 APIM Docker image..."
-docker pull wso2/wso2am:4.5.0-rocky || { echo "Failed to pull WSO2 APIM Docker image"; exit 1; }
+# Docker image should already be pulled in setup script, but ensure it exists
+if ! docker images --format "table {{.Repository}}:{{.Tag}}" | grep -q "wso2/wso2am:4.5.0-rocky"; then
+    echo "$(date): Docker image not found locally, pulling..."
+    docker pull wso2/wso2am:4.5.0-rocky || { echo "Failed to pull WSO2 APIM Docker image"; exit 1; }
+fi
+
+echo "$(date): Available Docker images:"
+docker images | grep wso2
 
 # Create temporary container to extract database scripts
+echo "$(date): Creating temporary container from wso2/wso2am:4.5.0-rocky..."
 temp_container=$(docker create wso2/wso2am:4.5.0-rocky) || { echo "Failed to create temporary container"; exit 1; }
+echo "$(date): Created temporary container: $temp_container"
 
 # Extract database scripts with cleanup on failure
 if ! docker cp $temp_container:/home/wso2carbon/wso2am-4.5.0/dbscripts/apimgt/mysql.sql /tmp/apimgt-mysql.sql; then
@@ -138,15 +145,32 @@ if [[ ! -f /tmp/mysql.sql ]]; then
     exit 1
 fi
 
-# Initialize APIM databases
-echo "$(date): Initializing APIM database schema..."
-echo "$(date): Running APIM database initialization..."
-mysql -h $mysql_host -u $mysql_user -p$mysql_password apim < /tmp/apimgt-mysql.sql || { echo "Failed to initialize APIM database"; exit 1; }
+echo "$(date): Database scripts extracted successfully"
+echo "$(date): APIM script size: $(wc -l < /tmp/apimgt-mysql.sql) lines"
+echo "$(date): Shared script size: $(wc -l < /tmp/mysql.sql) lines"
 
-echo "$(date): Running shared database initialization..."
+# Create databases and initialize them step by step (avoiding the source command issue)
+echo "$(date): Creating and initializing databases step by step..."
+
+# Create and initialize apim database
+echo "$(date): Creating and initializing apim database..."
+mysql -h $mysql_host -u $mysql_user -p$mysql_password -e "
+DROP DATABASE IF EXISTS apim;
+CREATE DATABASE apim CHARACTER SET latin1;
+" || { echo "Failed to create apim database"; exit 1; }
+
+mysql -h $mysql_host -u $mysql_user -p$mysql_password apim < /tmp/apimgt-mysql.sql || { echo "Failed to initialize apim database"; exit 1; }
+
+# Create and initialize shared database (used for registry and userstore)
+echo "$(date): Creating and initializing shared database..."
+mysql -h $mysql_host -u $mysql_user -p$mysql_password -e "
+DROP DATABASE IF EXISTS shared;
+CREATE DATABASE shared CHARACTER SET latin1;
+" || { echo "Failed to create shared database"; exit 1; }
+
 mysql -h $mysql_host -u $mysql_user -p$mysql_password shared < /tmp/mysql.sql || { echo "Failed to initialize shared database"; exit 1; }
 
-echo "$(date): Database initialization completed successfully"
+echo "$(date): Database creation and initialization completed successfully"
 
 # Copy configurations after replacing values
 temp_conf=$(mktemp -d /tmp/apim-conf.XXXXXX)
