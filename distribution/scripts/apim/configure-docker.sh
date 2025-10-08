@@ -207,6 +207,11 @@ hostname = "localhost"
 node_ip = "127.0.0.1"
 server_role = "default"
 
+[super_admin]
+username = "admin"
+password = "admin"
+create_admin_account = true
+
 [user_store]
 type = "database_unique_id"
 
@@ -231,22 +236,9 @@ password =  "wso2carbon"
 alias =  "wso2carbon"
 key_password =  "wso2carbon"
 
-[keystore.primary]
-file_name =  "wso2carbon.jks"
-type =  "JKS"
-password =  "wso2carbon"
-alias =  "wso2carbon"
-key_password =  "wso2carbon"
-
-[keystore.internal]
-file_name =  "wso2carbon.jks"
-type =  "JKS"
-password =  "wso2carbon"
-alias =  "wso2carbon"
-key_password =  "wso2carbon"
 
 [[apim.gateway.environment]]
-name = "Production and Sandbox"
+name = "Default"
 type = "hybrid"
 provider = "wso2"
 gateway_type = "Regular"
@@ -261,18 +253,38 @@ http_endpoint = "http://localhost:8280"
 https_endpoint = "https://localhost:8243"
 
 [apim.sync_runtime_artifacts.gateway]
-gateway_labels =["Production and Sandbox"]
+gateway_labels =["Default"]
 
-[apim.jwt]
-enable = true
-encoding = "base64" # base64,base64url
-#generator_impl = "org.wso2.carbon.apimgt.keymgt.token.JWTGenerator"
-claim_dialect = "http://wso2.org/claims"
-convert_dialect = false
-header = "X-JWT-Assertion"
-signing_algorithm = "RS256"
-#enable_user_claims = true
-#claims_extractor_impl = "org.wso2.carbon.apimgt.impl.token.ExtendedDefaultClaimsRetriever"
+[apim.analytics]
+enable = false
+auth_token = ""
+
+[apim.cors]
+allow_origins = "*"
+allow_methods = ["GET","PUT","POST","DELETE","PATCH","OPTIONS"]
+allow_headers = ["authorization","Access-Control-Allow-Origin","Content-Type","SOAPAction","apikey","Internal-Key"]
+allow_credentials = false
+
+[[event_handler]]
+name="userPostSelfRegistration"
+subscriptions=["POST_ADD_USER"]
+
+[database.local]
+url = "jdbc:h2:./repository/database/WSO2CARBON_DB;DB_CLOSE_ON_EXIT=FALSE"
+
+[[event_listener]]
+id = "token_revocation"
+type = "org.wso2.carbon.identity.core.handler.AbstractIdentityHandler"
+name = "org.wso2.is.notification.ApimOauthEventInterceptor"
+order = 1
+[event_listener.properties]
+notification_endpoint = "https://localhost:9443/internal/data/v1/notify"
+username = "admin"
+password = "admin"
+'header.X-WSO2-KEY-MANAGER' = "default"
+
+[system.parameter]
+'passthrough.metrics.collection.disabled' = true
 
 EOF
 
