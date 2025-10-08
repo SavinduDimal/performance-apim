@@ -211,35 +211,12 @@ function setup() {
     echo "$(date): Configuring WSO2 API Manager..."
     sudo -u $os_user $script_dir/../apim/configure-docker.sh -m $mysql_host -u $mysql_user -p $mysql_password -c $mysql_connector_file || { echo "Failed to configure APIM"; exit 1; }
 
-    # Start API Manager using Docker (test first with minimal config)
-    echo "$(date): Testing WSO2 API Manager Docker container startup..."
-    sudo -u $os_user $script_dir/../apim/apim-start-docker-test.sh -i $docker_image -m 2G || { 
-        echo "Basic Docker container test failed, trying with full configuration..."
-        sudo -u $os_user $script_dir/../apim/apim-start-docker-simple.sh -i $docker_image -m 2G || { 
-            echo "Failed to start APIM Docker container"; 
-            exit 1; 
-        }
+    # Start API Manager using Docker
+    echo "$(date): Starting WSO2 API Manager Docker container..."
+    sudo -u $os_user $script_dir/../apim/apim-start-docker-simple.sh -i $docker_image -m 2G || { 
+        echo "Failed to start APIM Docker container"; 
+        exit 1; 
     }
-
-    # Wait for APIM to start
-    echo "Waiting for API Manager to start"
-    exit_status=100
-    n=0
-    until [ $n -ge 60 ]; do
-        response_code="$(curl -sk -w "%{http_code}" -o /dev/null https://localhost:8243/services/Version || echo "")"
-        if [ $response_code -eq 200 ]; then
-            echo "API Manager started"
-            exit_status=0
-            break
-        fi
-        sleep 10
-        n=$(($n + 1))
-    done
-
-    if [ $exit_status -ne 0 ]; then
-        echo "API Manager failed to start"
-        exit 1
-    fi
 
     # Create APIs in Local API Manager
     sudo -u $os_user $script_dir/../apim/create-api.sh -a localhost -n "echo" -d "Echo API" -b "http://${netty_host}:8688/" -k $token_type
@@ -268,6 +245,7 @@ function setup() {
     fi
 
     popd
+    
     echo "Completed API Manager Docker setup..."
 }
 export -f setup
