@@ -265,24 +265,6 @@ allow_methods = ["GET","PUT","POST","DELETE","PATCH","OPTIONS"]
 allow_headers = ["authorization","Access-Control-Allow-Origin","Content-Type","SOAPAction","apikey","Internal-Key"]
 allow_credentials = false
 
-[[event_handler]]
-name="userPostSelfRegistration"
-subscriptions=["POST_ADD_USER"]
-
-[database.local]
-url = "jdbc:h2:./repository/database/WSO2CARBON_DB;DB_CLOSE_ON_EXIT=FALSE"
-
-[[event_listener]]
-id = "token_revocation"
-type = "org.wso2.carbon.identity.core.handler.AbstractIdentityHandler"
-name = "org.wso2.is.notification.ApimOauthEventInterceptor"
-order = 1
-[event_listener.properties]
-notification_endpoint = "https://localhost:9443/internal/data/v1/notify"
-username = "admin"
-password = "admin"
-'header.X-WSO2-KEY-MANAGER' = "default"
-
 [system.parameter]
 'passthrough.metrics.collection.disabled' = true
 

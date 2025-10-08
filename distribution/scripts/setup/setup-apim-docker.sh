@@ -213,7 +213,7 @@ function setup() {
 
     # Start API Manager using Docker
     echo "$(date): Starting WSO2 API Manager Docker container..."
-    sudo -u $os_user $script_dir/../apim/apim-start-docker-simple.sh -i $docker_image -m 2G || { 
+    sudo -u $os_user $script_dir/../apim/apim-start-docker-production.sh -i $docker_image -m 2G || { 
         echo "Failed to start APIM Docker container"; 
         exit 1; 
     }
