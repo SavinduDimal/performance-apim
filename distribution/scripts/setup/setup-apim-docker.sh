@@ -161,6 +161,10 @@ function setup() {
     # Install Docker
     apt-get install -y docker-ce docker-ce-cli containerd.io || { echo "Failed to install Docker"; exit 1; }
     
+    # Install Java (needed for JWT token generation)
+    echo "$(date): Installing OpenJDK 11 for token generation..."
+    apt-get install -y openjdk-11-jdk || { echo "Failed to install Java"; exit 1; }
+    
     # Add user to docker group
     usermod -aG docker $os_user
     
@@ -174,6 +178,9 @@ function setup() {
     
     # Test Docker installation
     docker --version || { echo "Docker installation verification failed"; exit 1; }
+    
+    # Test Java installation
+    java --version || { echo "Java installation verification failed"; exit 1; }
     
     # Install Docker Compose
     echo "$(date): Installing Docker Compose..."
