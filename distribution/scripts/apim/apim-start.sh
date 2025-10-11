@@ -73,18 +73,28 @@ if is_docker_deployment; then
     # For Docker deployment, APIM is already running in the container
     # Just verify it's responding to requests
     echo "Verifying WSO2 APIM is ready in Docker container..."
+    
+    exit_status=100
+    
     for i in {1..30}; do
         response_code="$(curl -sk -w "%{http_code}" -o /dev/null https://localhost:8243/services/Version || echo "000")"
         if [ "$response_code" = "200" ]; then
             echo "WSO2 APIM is ready and responding (Docker)"
-            exit 0
+            exit_status=0
+            break
         fi
         echo "Waiting for APIM to respond... (attempt $i/30, response: $response_code)"
         sleep 10
     done
     
-    echo "ERROR: WSO2 APIM did not respond within expected time"
-    exit 1
+    if [ $exit_status -ne 0 ]; then
+        echo "ERROR: WSO2 APIM did not respond within expected time"
+        exit 1
+    fi
+    
+    # Wait for another 10 seconds to make sure that the server is ready to accept API requests.
+    sleep 10
+    exit $exit_status
     
 else
     echo "Traditional ZIP-based WSO2 APIM deployment detected"
