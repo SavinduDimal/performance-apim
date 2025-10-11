@@ -23,15 +23,25 @@ script_dir=$(dirname "$0")
 # Execute common script
 . $script_dir/perf-test-common.sh
 
+# Check if this is a resumed test execution
+if [[ "$RESUME_TESTS" == "true" && -n "$COMPLETED_SCENARIOS" ]]; then
+    echo "=========================================="
+    echo "RESUMING INTERRUPTED PERFORMANCE TESTS"
+    echo "=========================================="
+    echo "Completed scenarios: $COMPLETED_SCENARIOS"
+    echo "Will skip these scenarios and continue with remaining ones."
+    echo ""
+fi
+
 function initialize() {
     export apim_ssh_host=apim
     export apim_host=$(get_ssh_hostname $apim_ssh_host)
     echo "Downloading tokens to $HOME."
-    scp $apim_ssh_host:apim/target/tokens.csv $HOME/
+    scp -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ConnectTimeout=30 $apim_ssh_host:apim/target/tokens.csv $HOME/
     if [[ $jmeter_servers -gt 1 ]]; then
         for jmeter_ssh_host in ${jmeter_ssh_hosts[@]}; do
             echo "Copying tokens to $jmeter_ssh_host"
-            scp $HOME/tokens.csv $jmeter_ssh_host:
+            scp -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ConnectTimeout=30 $HOME/tokens.csv $jmeter_ssh_host:
         done
     fi
 }
@@ -66,8 +76,11 @@ function before_execute_test_scenario() {
         tokens="$HOME/tokens.csv")
     echo "Starting APIM service"
     
-    # Ensure SSH call to apim-start.sh doesn't fail the entire script
-    if ! ssh $apim_ssh_host "./apim/apim-start.sh -m $heap"; then
+    # Use SSH with keep-alive options to prevent session timeout
+    # ServerAliveInterval=60 sends keep-alive every 60 seconds
+    # ServerAliveCountMax=3 allows 3 missed keep-alives before disconnect (3 minutes total)
+    # ConnectTimeout=30 sets initial connection timeout to 30 seconds
+    if ! ssh -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ConnectTimeout=30 $apim_ssh_host "./apim/apim-start.sh -m $heap"; then
         echo "WARNING: apim-start.sh returned non-zero exit code, but continuing..."
         # Don't exit - this might be expected behavior in Docker mode
     fi
