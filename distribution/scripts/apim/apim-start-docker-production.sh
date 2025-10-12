@@ -17,6 +17,7 @@
 # Start WSO2 API Manager using Docker (Production approach - step by step)
 # ----------------------------------------------------------------------------
 
+script_dir=$(dirname "$0")
 default_heap_size="2G"
 heap_size="$default_heap_size"
 docker_image=""
@@ -67,6 +68,26 @@ if docker ps -a --format "table {{.Names}}" | grep -q "^wso2am$"; then
     docker rm wso2am || true
 fi
 
+# Create performance-optimized startup script (disable diagnostic tool)
+echo "Creating performance-optimized API Manager startup script..."
+mkdir -p wso2am-docker/bin
+if [[ -f "${script_dir}/conf/api-manager-optimized.sh" ]]; then
+    cp "${script_dir}/conf/api-manager-optimized.sh" wso2am-docker/bin/api-manager.sh
+    chmod +x wso2am-docker/bin/api-manager.sh
+    echo "Performance optimization: Diagnostic tool disabled for better performance"
+else
+    echo "Warning: Optimized API Manager script not found. Creating default one..."
+    # Create a simple optimized script inline
+    cat > wso2am-docker/bin/api-manager.sh << 'EOFSCRIPT'
+#!/bin/bash
+# Performance-optimized API Manager startup (diagnostic tool disabled)
+CARBON_HOME="/home/wso2carbon/wso2am-4.5.0"
+echo "Starting WSO2 API Manager with diagnostic tool disabled for performance"
+exec "$CARBON_HOME/bin/wso2server.sh" "$@"
+EOFSCRIPT
+    chmod +x wso2am-docker/bin/api-manager.sh
+fi
+
 echo "Setting Heap to ${heap_size}"
 
 # Start with minimal configuration first (like test script that works)
@@ -113,8 +134,8 @@ if [ "$basic_works" = "false" ]; then
     exit 1
 fi
 
-# Now try with minimal volume mounts (just MySQL connector)
-echo "Step 2: Starting with MySQL connector only..."
+# Now try with minimal volume mounts (MySQL connector + optimized startup script)
+echo "Step 2: Starting with MySQL connector and performance optimizations..."
 docker run -d \
     --name wso2am \
     --hostname localhost \
@@ -123,7 +144,8 @@ docker run -d \
     -p 8280:8280 \
     -p 8243:8243 \
     -v $(pwd)/wso2am-docker/repository/components/lib:/home/wso2carbon/wso2am-4.5.0/repository/components/lib \
-    ${docker_image} || { echo "Failed to start Docker container with MySQL connector"; exit 1; }
+    -v $(pwd)/wso2am-docker/bin/api-manager.sh:/home/wso2carbon/wso2am-4.5.0/bin/api-manager.sh:ro \
+    ${docker_image} || { echo "Failed to start Docker container with MySQL connector and optimizations"; exit 1; }
 
 # Wait and test
 echo "Waiting for container with MySQL connector to initialize..."

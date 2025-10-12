@@ -172,6 +172,26 @@ mysql -h $mysql_host -u $mysql_user -p$mysql_password shared < /tmp/mysql.sql ||
 
 echo "$(date): Database creation and initialization completed successfully"
 
+# Create performance-optimized startup script (disable diagnostic tool)
+echo "Creating performance-optimized API Manager startup script..."
+mkdir -p wso2am-docker/bin
+if [[ -f "${script_dir}/conf/api-manager-optimized.sh" ]]; then
+    cp "${script_dir}/conf/api-manager-optimized.sh" wso2am-docker/bin/api-manager.sh
+    chmod +x wso2am-docker/bin/api-manager.sh
+    echo "Performance optimization: Diagnostic tool disabled for better performance"
+else
+    echo "Warning: Optimized API Manager script not found. Creating default one..."
+    # Create a simple optimized script inline
+    cat > wso2am-docker/bin/api-manager.sh << 'EOFSCRIPT'
+#!/bin/bash
+# Performance-optimized API Manager startup (diagnostic tool disabled)
+CARBON_HOME="/home/wso2carbon/wso2am-4.5.0"
+echo "Starting WSO2 API Manager with diagnostic tool disabled for performance"
+exec "$CARBON_HOME/bin/wso2server.sh" "$@"
+EOFSCRIPT
+    chmod +x wso2am-docker/bin/api-manager.sh
+fi
+
 # Copy configurations after replacing values
 temp_conf=$(mktemp -d /tmp/apim-conf.XXXXXX)
 

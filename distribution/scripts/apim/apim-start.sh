@@ -82,6 +82,21 @@ if is_docker_deployment; then
     fi
     
     # For Docker deployment, APIM is already running in the container
+    # Check if we need to disable diagnostic tool for performance optimization
+    echo "Checking if diagnostic tool needs to be disabled for performance..."
+    
+    # Create optimized startup script if it doesn't exist
+    script_dir=$(dirname "$0")
+    if [[ ! -f "wso2am-docker/bin/api-manager.sh" ]]; then
+        echo "Creating performance-optimized API Manager startup script..."
+        mkdir -p wso2am-docker/bin
+        if [[ -f "${script_dir}/conf/api-manager-optimized.sh" ]]; then
+            cp "${script_dir}/conf/api-manager-optimized.sh" wso2am-docker/bin/api-manager.sh
+            chmod +x wso2am-docker/bin/api-manager.sh
+            echo "Optimized API Manager script created (diagnostic tool disabled)"
+        fi
+    fi
+    
     # Just verify it's responding to requests
     echo "Verifying WSO2 APIM is ready in Docker container..."
     
