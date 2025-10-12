@@ -90,12 +90,15 @@ fi
 
 echo "Setting Heap to ${heap_size}"
 
-# Start with minimal configuration first (like test script that works)
-echo "Starting WSO2 API Manager container with minimal configuration..."
+# Start with performance-optimized configuration
+echo "Starting WSO2 API Manager container with performance optimizations..."
 
-# Create logs directory with proper permissions
+# Create logs directory with proper permissions  
 mkdir -p $(pwd)/wso2am-docker/logs
 chmod 777 $(pwd)/wso2am-docker/logs 2>/dev/null || true
+
+# Set up performance-optimized JVM arguments for Docker container
+export JAVA_OPTS="-Xms${heap_size} -Xmx${heap_size} -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20 -XX:G1NewSizePercent=15 -XX:+UseStringDeduplication -Xlog:gc*:gc.log:time,uptime,tags,level"
 
 # Start with basic container first (no volume mounts)
 echo "Step 1: Testing basic container startup (no volumes)..."
@@ -135,14 +138,18 @@ if [ "$basic_works" = "false" ]; then
 fi
 
 # Now try with minimal volume mounts (MySQL connector + optimized startup script)
-echo "Step 2: Starting with MySQL connector and performance optimizations..."
+echo "Step 2: Starting with MySQL connector, performance optimizations, and GC logging..."
 docker run -d \
     --name wso2am \
     --hostname localhost \
+    --memory="4g" \
+    --cpus="2.0" \
     -p 9763:9763 \
     -p 9443:9443 \
     -p 8280:8280 \
     -p 8243:8243 \
+    -e JAVA_OPTS="$JAVA_OPTS" \
+    -v $(pwd)/wso2am-docker/logs:/home/wso2carbon/wso2am-4.5.0/repository/logs \
     -v $(pwd)/wso2am-docker/repository/components/lib:/home/wso2carbon/wso2am-4.5.0/repository/components/lib \
     -v $(pwd)/wso2am-docker/bin/api-manager.sh:/home/wso2carbon/wso2am-4.5.0/bin/api-manager.sh:ro \
     ${docker_image} || { echo "Failed to start Docker container with MySQL connector and optimizations"; exit 1; }

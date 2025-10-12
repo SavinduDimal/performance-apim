@@ -226,9 +226,20 @@ function setup() {
     }
 
     # Create APIs in Local API Manager
-    sudo -u $os_user $script_dir/../apim/create-api.sh -a localhost -n "echo" -d "Echo API" -b "http://${netty_host}:8688/" -k $token_type
-    sudo -u $os_user $script_dir/../apim/create-api.sh -a localhost -n "mediation" -d "Mediation API" -b "http://${netty_host}:8688/" \
-        -o "$(mediation_out_sequence | tr -d "\n\r")" -k $token_type
+    echo "$(date): Creating Echo API..."
+    if ! sudo -u $os_user $script_dir/../apim/create-api.sh -a localhost -n "echo" -d "Echo API" -b "http://${netty_host}:8688/" -k $token_type; then
+        echo "ERROR: Failed to create Echo API"
+        exit 1
+    fi
+    
+    echo "$(date): Creating Mediation API..."
+    if ! sudo -u $os_user $script_dir/../apim/create-api.sh -a localhost -n "mediation" -d "Mediation API" -b "http://${netty_host}:8688/" \
+        -o "$(mediation_out_sequence | tr -d "\n\r")" -k $token_type; then
+        echo "ERROR: Failed to create Mediation API" 
+        exit 1
+    fi
+    
+    echo "$(date): Both APIs created successfully"
 
     if [ "$token_type" == "JWT" ]; then
         tokens_csv="$script_dir/../apim/target/tokens.csv"

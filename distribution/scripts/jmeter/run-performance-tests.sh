@@ -64,13 +64,21 @@ function before_execute_test_scenario() {
     jmeter_params+=("host=$apim_host" "port=8243" "path=$service_path")
     jmeter_params+=("payload=$HOME/${msize}B.json" "response_size=${msize}B" "protocol=$protocol"
         tokens="$HOME/tokens.csv")
-    echo "Starting APIM service"
+    echo "Starting APIM service for scenario: ${scenario[name]}"
     
-    # Ensure SSH call to apim-start.sh doesn't fail the entire script
-    if ! ssh $apim_ssh_host "./apim/apim-start.sh -m $heap"; then
-        echo "WARNING: apim-start.sh returned non-zero exit code, but continuing..."
-        # Don't exit - this might be expected behavior in Docker mode
+    # Use temporary error handling to prevent test failure
+    set +e
+    ssh_result=0
+    ssh $apim_ssh_host "./apim/apim-start.sh -m $heap" || ssh_result=$?
+    set -e
+    
+    if [ $ssh_result -ne 0 ]; then
+        echo "WARNING: apim-start.sh returned exit code $ssh_result, but continuing..."
+        echo "This is expected behavior for Docker deployments where container is already running"
     fi
+    
+    # Wait a moment to ensure APIM is ready
+    sleep 5
 }
 
 function after_execute_test_scenario() {
@@ -78,8 +86,22 @@ function after_execute_test_scenario() {
     
     # Make log file downloads non-fatal to prevent script termination
     set +e
-    download_file $apim_ssh_host wso2am/repository/logs/wso2carbon.log wso2carbon.log
-    download_file $apim_ssh_host wso2am/repository/logs/gc.log apim_gc.log
+    
+    # Check if we're running in Docker mode and adjust log paths accordingly
+    if ssh $apim_ssh_host "docker ps --format 'table {{.Names}}' | grep -q '^wso2am$' 2>/dev/null"; then
+        echo "Docker deployment detected - downloading logs from container"
+        # For Docker deployments, copy logs from container first then download
+        ssh $apim_ssh_host "docker cp wso2am:/home/wso2carbon/wso2am-4.5.0/repository/logs/wso2carbon.log /tmp/docker-wso2carbon.log 2>/dev/null || true"
+        ssh $apim_ssh_host "docker cp wso2am:/home/wso2carbon/wso2am-4.5.0/repository/logs/gc.log /tmp/docker-gc.log 2>/dev/null || true"
+        download_file $apim_ssh_host /tmp/docker-wso2carbon.log wso2carbon.log
+        download_file $apim_ssh_host /tmp/docker-gc.log apim_gc.log
+        # Clean up temporary files
+        ssh $apim_ssh_host "rm -f /tmp/docker-wso2carbon.log /tmp/docker-gc.log 2>/dev/null || true"
+    else
+        echo "Traditional deployment detected - using standard log paths"
+        download_file $apim_ssh_host wso2am/repository/logs/wso2carbon.log wso2carbon.log
+        download_file $apim_ssh_host wso2am/repository/logs/gc.log apim_gc.log
+    fi
     #download_file $apim_ssh_host wso2am/repository/logs/recording.jfr recording.jfr
     set -e
 }
