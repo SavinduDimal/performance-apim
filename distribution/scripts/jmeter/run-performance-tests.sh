@@ -58,6 +58,13 @@ declare -A test_scenario1=(
     [skip]=false
 )
 
+# Debug: Print all available test scenarios
+echo "DEBUG: Available test scenarios:"
+for scenario_var in ${!test_scenario@}; do
+    eval "declare -A current_scenario=(\${$scenario_var[@]})"
+    echo "  - ${current_scenario[name]} (skip=${current_scenario[skip]})"
+done
+
 function before_execute_test_scenario() {
     local service_path=${scenario[path]}
     local protocol=${scenario[protocol]}
@@ -82,10 +89,14 @@ function before_execute_test_scenario() {
 }
 
 function after_execute_test_scenario() {
-    write_server_metrics apim $apim_ssh_host org.wso2.carbon.bootstrap.Bootstrap
-    
-    # Make log file downloads non-fatal to prevent script termination
+    # Make all operations in this function non-fatal to prevent test termination
     set +e
+    
+    # Try to write server metrics, but don't fail if it encounters issues
+    echo "Collecting server metrics for APIM..."
+    write_server_metrics apim $apim_ssh_host org.wso2.carbon.bootstrap.Bootstrap || {
+        echo "WARNING: Failed to collect complete server metrics for APIM, continuing..."
+    }
     
     # Check if we're running in Docker mode and adjust log paths accordingly
     if ssh $apim_ssh_host "docker ps --format 'table {{.Names}}' | grep -q '^wso2am$' 2>/dev/null"; then
@@ -93,17 +104,20 @@ function after_execute_test_scenario() {
         # For Docker deployments, copy logs from container first then download
         ssh $apim_ssh_host "docker cp wso2am:/home/wso2carbon/wso2am-4.5.0/repository/logs/wso2carbon.log /tmp/docker-wso2carbon.log 2>/dev/null || true"
         ssh $apim_ssh_host "docker cp wso2am:/home/wso2carbon/wso2am-4.5.0/repository/logs/gc.log /tmp/docker-gc.log 2>/dev/null || true"
-        download_file $apim_ssh_host /tmp/docker-wso2carbon.log wso2carbon.log
-        download_file $apim_ssh_host /tmp/docker-gc.log apim_gc.log
+        download_file $apim_ssh_host /tmp/docker-wso2carbon.log wso2carbon.log || echo "WARNING: Failed to download wso2carbon.log"
+        download_file $apim_ssh_host /tmp/docker-gc.log apim_gc.log || echo "WARNING: Failed to download gc.log"
         # Clean up temporary files
         ssh $apim_ssh_host "rm -f /tmp/docker-wso2carbon.log /tmp/docker-gc.log 2>/dev/null || true"
     else
         echo "Traditional deployment detected - using standard log paths"
-        download_file $apim_ssh_host wso2am/repository/logs/wso2carbon.log wso2carbon.log
-        download_file $apim_ssh_host wso2am/repository/logs/gc.log apim_gc.log
+        download_file $apim_ssh_host wso2am/repository/logs/wso2carbon.log wso2carbon.log || echo "WARNING: Failed to download wso2carbon.log"
+        download_file $apim_ssh_host wso2am/repository/logs/gc.log apim_gc.log || echo "WARNING: Failed to download gc.log"
     fi
     #download_file $apim_ssh_host wso2am/repository/logs/recording.jfr recording.jfr
+    
+    # Always re-enable error handling before returning to ensure test continues
     set -e
+    echo "Server metrics collection completed for current test scenario."
 }
 
 test_scenarios
