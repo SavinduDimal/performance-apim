@@ -97,8 +97,22 @@ echo "Starting WSO2 API Manager container with performance optimizations..."
 mkdir -p $(pwd)/wso2am-docker/logs
 chmod 777 $(pwd)/wso2am-docker/logs 2>/dev/null || true
 
-# Set up performance-optimized JVM arguments for Docker container
-export JAVA_OPTS="-Xms${heap_size} -Xmx${heap_size} -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20 -XX:G1NewSizePercent=15 -XX:+UseStringDeduplication -Xlog:gc*:gc.log:time,uptime,tags,level"
+# Set up performance-optimized JVM arguments for JDK 21 (Docker container)
+export JAVA_OPTS="-Xms${heap_size} -Xmx${heap_size} \
+-XX:+UseZGC \
+-XX:+UnlockExperimentalVMOptions \
+-XX:+UseLargePages \
+-XX:+AlwaysPreTouch \
+-XX:+UseStringDeduplication \
+-XX:MaxGCPauseMillis=50 \
+-XX:+OptimizeStringConcat \
+-XX:+UseCompressedOops \
+-XX:+UseCompressedClassPointers \
+-server \
+-Djava.awt.headless=true \
+-Djava.security.egd=file:/dev/./urandom \
+-Dfile.encoding=UTF8 \
+-Xlog:gc*:file=/home/wso2carbon/wso2am-4.5.0/repository/logs/gc.log:time,uptime,level,tags"
 
 # Start with basic container first (no volume mounts)
 echo "Step 1: Testing basic container startup (no volumes)..."
@@ -142,7 +156,7 @@ echo "Step 2: Starting with MySQL connector, performance optimizations, and GC l
 docker run -d \
     --name wso2am \
     --hostname localhost \
-    --memory="4g" \
+    --memory="6g" \
     --cpus="2.0" \
     -p 9763:9763 \
     -p 9443:9443 \
