@@ -27,7 +27,7 @@ export jdk11_distribution=""
 export mysql_connector_jar=""
 export wso2am_ec2_instance_type=""
 export wso2am_rds_db_instance_class=""
-export docker_image="wso2/wso2am:4.5.0-rocky"
+export docker_image="wso2/wso2am:4.5.0-alpine"
 
 export aws_cloudformation_template_filename="apim_perf_test_cfn.yaml"
 export application_name="WSO2 API Manager"
@@ -44,7 +44,7 @@ function usageHelp() {
     echo "-c: MySQL Connector JAR file."
     echo "-A: Amazon EC2 Instance Type for WSO2 API Manager."
     echo "-D: Amazon EC2 DB Instance Class for WSO2 API Manager RDS Instance."
-    echo "-a: WSO2 API Manager Distribution (legacy parameter, will be ignored - Docker image wso2/wso2am:4.5.0-rocky will be used)."
+    echo "-a: WSO2 API Manager Distribution (legacy parameter, will be ignored - Docker image wso2/wso2am:4.5.0-alpine will be used)."
     echo "-q: JDK 11 Distribution (legacy parameter, will be ignored - Docker image includes JDK)."
 
 }

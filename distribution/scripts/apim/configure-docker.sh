@@ -105,17 +105,17 @@ rm -f /tmp/apimgt-mysql.sql /tmp/mysql.sql
 # Extract database scripts from Docker image first
 echo "$(date): Extracting database scripts from WSO2 APIM Docker image..."
 # Docker image should already be pulled in setup script, but ensure it exists
-if ! docker images --format "table {{.Repository}}:{{.Tag}}" | grep -q "wso2/wso2am:4.5.0-rocky"; then
+if ! docker images --format "table {{.Repository}}:{{.Tag}}" | grep -q "wso2/wso2am:4.5.0-alpine"; then
     echo "$(date): Docker image not found locally, pulling..."
-    docker pull wso2/wso2am:4.5.0-rocky || { echo "Failed to pull WSO2 APIM Docker image"; exit 1; }
+    docker pull wso2/wso2am:4.5.0-alpine || { echo "Failed to pull WSO2 APIM Docker image"; exit 1; }
 fi
 
 echo "$(date): Available Docker images:"
 docker images | grep wso2
 
 # Create temporary container to extract database scripts
-echo "$(date): Creating temporary container from wso2/wso2am:4.5.0-rocky..."
-temp_container=$(docker create wso2/wso2am:4.5.0-rocky) || { echo "Failed to create temporary container"; exit 1; }
+echo "$(date): Creating temporary container from wso2/wso2am:4.5.0-alpine..."
+temp_container=$(docker create wso2/wso2am:4.5.0-alpine) || { echo "Failed to create temporary container"; exit 1; }
 echo "$(date): Created temporary container: $temp_container"
 
 # Extract database scripts with cleanup on failure

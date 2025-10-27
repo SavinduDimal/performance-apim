@@ -20,7 +20,7 @@
   WSO2APIManagerDockerImage:
     Description: The Docker image for WSO2 API Manager
     Type: String
-    Default: wso2/wso2am:4.5.0-rocky
+    Default: wso2/wso2am:4.5.0-alpine
   WSO2APIManagerDistributionName:
     Description: The name of the 'WSO2 API Manager Distribution' in S3 Bucket (legacy parameter, will be ignored)
     Type: String
