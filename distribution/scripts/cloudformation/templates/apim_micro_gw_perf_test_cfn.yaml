@@ -117,6 +117,7 @@
   RDSInstance:
     Type: 'AWS::RDS::DBInstance'
     Properties:
+      AvailabilityZone: !GetAtt PrivateSubnet.AvailabilityZone
       DBInstanceClass: !Ref WSO2APIManagerDBInstanceClass
       AllocatedStorage: '5'
       Engine: 'MySQL'
