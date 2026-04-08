@@ -49,7 +49,7 @@ function usageHelp() {
 }
 export -f usageHelp
 
-while getopts ":u:f:d:k:n:j:o:g:s:b:r:J:S:N:t:p:w:ha:c:A:D:q:" opt; do
+while getopts ":u:f:d:k:n:j:o:g:s:b:r:J:S:N:t:p:w:Pha:c:A:D:q:" opt; do
     case "${opt}" in
     a)
         wso2am_distribution=${OPTARG}
@@ -65,6 +65,9 @@ while getopts ":u:f:d:k:n:j:o:g:s:b:r:J:S:N:t:p:w:ha:c:A:D:q:" opt; do
         ;;
     q)
         jdk11_distribution=${OPTARG}
+        ;;
+    P)
+        opts+=("-P")
         ;;
     *)
         opts+=("-${opt}")

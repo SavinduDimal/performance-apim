@@ -48,7 +48,7 @@ function usageHelp() {
 }
 export -f usageHelp
 
-while getopts ":u:f:d:k:n:j:o:g:s:b:r:J:S:N:t:p:w:ha:m:c:A:D:" opt; do
+while getopts ":u:f:d:k:n:j:o:g:s:b:r:J:S:N:t:p:w:Pha:m:c:A:D:" opt; do
     case "${opt}" in
     a)
         wso2am_distribution=${OPTARG}
@@ -64,6 +64,9 @@ while getopts ":u:f:d:k:n:j:o:g:s:b:r:J:S:N:t:p:w:ha:m:c:A:D:" opt; do
         ;;
     D)
         wso2am_rds_db_instance_class=${OPTARG}
+        ;;
+    P)
+        opts+=("-P")
         ;;
     *)
         opts+=("-${opt}")
