@@ -250,3 +250,8 @@ password = "${admin.password}"
 
 [system.parameter]
 'passthrough.metrics.collection.disabled' = true
+
+[[oauth.extensions.token_types]]
+name = "JWT"
+issuer = "org.wso2.is.key.manager.tokenpersistence.issuer.ExtendedJWTTokenIssuer"  
+
