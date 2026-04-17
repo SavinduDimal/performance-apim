@@ -171,31 +171,10 @@ function setup() {
     # Start API Manager
     sudo -u $os_user $script_dir/../apim/apim-start.sh -m 1G
 
-    # Create APIs in Local API Manager
-    sudo -u $os_user $script_dir/../apim/create-api.sh -a localhost -n "echo" -d "Echo API" -b "http://${netty_host}:8688/" -k $token_type
-    sudo -u $os_user $script_dir/../apim/create-api.sh -a localhost -n "mediation" -d "Mediation API" -b "http://${netty_host}:8688/" \
-        -o "$(mediation_out_sequence | tr -d "\n\r")" -k $token_type
-
-    if [ "$token_type" == "JWT" ]; then
-        tokens_csv="$script_dir/../apim/target/tokens.csv"
-        if [[ -f $tokens_csv ]]; then
-            sudo -u $os_user rm tokens_csv
-        fi
-        sudo -u $os_user $script_dir/../apim/generate-jwt-tokens.sh -t 4000
-    else
-        # Generate tokens
-        tokens_sql="$script_dir/../apim/target/tokens.sql"
-        if [[ ! -f $tokens_sql ]]; then
-            sudo -u $os_user $script_dir/../apim/generate-tokens.sh -t 4000
-        fi
-
-        if [[ -f $tokens_sql ]]; then
-            mysql -h $mysql_host -u $mysql_user -p$mysql_password apim <$tokens_sql
-        else
-            echo "SQL file with generated tokens not found."
-            exit 1
-        fi
-    fi
+    # Create the AI API used by the performance test. The API resource has auth disabled,
+    # so token generation and application subscription are intentionally skipped.
+    sudo -u $os_user $script_dir/../apim/create-ai-api.sh -a localhost -n "aiapi" \
+        -d "AI API Performance Test API" -b "http://${netty_host}:3000"
 
     popd
     echo "Completed API Manager setup..."
