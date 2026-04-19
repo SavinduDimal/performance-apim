@@ -6,9 +6,8 @@
 # ----------------------------------------------------------------------------
 
 script_dir=$(dirname "$0")
+export PAYLOAD_GENERATOR_ARGS="-a"
 . $script_dir/perf-test-common.sh
-
-payload_generator_args=("-a")
 
 function initialize() {
     export apim_ssh_host=apim
@@ -54,6 +53,10 @@ function before_execute_test_scenario() {
 
     jmeter_params+=("host=$service_host" "port=${scenario[port]}" "path=${scenario[path]}")
     jmeter_params+=("payload=$HOME/ai_${msize}B.json" "protocol=${scenario[protocol]}")
+    if [[ ! -f $HOME/ai_${msize}B.json ]]; then
+        echo "AI API payload file is missing: $HOME/ai_${msize}B.json"
+        exit 1
+    fi
 
     if [[ ${scenario[use_apim]} == true ]]; then
         echo "Starting APIM service"
