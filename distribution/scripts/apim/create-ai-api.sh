@@ -120,6 +120,75 @@ if [[ -z $api_id || $api_id == "null" ]]; then
     exit 1
 fi
 
+echo "Updating AI API swagger security for chat completions"
+swagger_definition=$(jq -nc \
+    --arg title "$api_display_name" \
+    --arg version "$api_version" \
+    --arg description "$api_description" \
+    --arg backend "$backend_endpoint_url" \
+    --arg base_path "/${api_context}/${api_version}" \
+    '{
+      "openapi":"3.1.0",
+      "info":{"title":$title,"description":$description,"version":$version},
+      "servers":[{"url":$backend,"description":"Mock AI backend"}],
+      "security":[{"default":[]}],
+      "tags":[{"name":"chat","description":"Chat Completion API.","x-displayName":"Chat"}],
+      "paths":{
+        "/v1/chat/completions":{
+          "post":{
+            "tags":["chat"],
+            "summary":"Chat Completion",
+            "operationId":"chat_completion_v1_chat_completions_post",
+            "requestBody":{
+              "required":true,
+              "content":{"application/json":{"schema":{"type":"object"}}}
+            },
+            "responses":{
+              "200":{
+                "description":"Successful Response",
+                "content":{"application/json":{"schema":{"type":"object"}}}
+              }
+            },
+            "security":[{"default":[]}],
+            "x-auth-type":"None",
+            "x-throttling-tier":"Unlimited",
+            "x-wso2-application-security":{"security-types":["api_key"],"optional":false}
+          }
+        }
+      },
+      "components":{
+        "securitySchemes":{
+          "ApiKey":{"type":"http","scheme":"bearer"},
+          "default":{"type":"oauth2","flows":{"implicit":{"authorizationUrl":"https://test.com","scopes":{}}}}
+        }
+      },
+      "x-wso2-auth-header":"Authorization",
+      "x-wso2-api-key-header":"ApiKey",
+      "x-wso2-cors":{
+        "corsConfigurationEnabled":false,
+        "accessControlAllowOrigins":["*"],
+        "accessControlAllowCredentials":false,
+        "accessControlAllowHeaders":["authorization","Access-Control-Allow-Origin","Content-Type","SOAPAction","apikey","Internal-Key"],
+        "accessControlAllowMethods":["GET","PUT","POST","DELETE","PATCH","OPTIONS"]
+      },
+      "x-wso2-production-endpoints":{"urls":[$backend],"type":"http"},
+      "x-wso2-basePath":$base_path,
+      "x-wso2-transports":["http","https"],
+      "x-wso2-application-security":{"security-types":["api_key"],"optional":false},
+      "x-wso2-response-cache":{"enabled":false,"cacheTimeoutInSeconds":300}
+    }')
+swagger_response_file="/tmp/create-ai-api-swagger-response-$$.json"
+swagger_status=$($curl_command -w "%{http_code}" -o "$swagger_response_file" \
+    -X PUT "${base_https_url}/api/am/publisher/v4/apis/${api_id}/swagger" \
+    -u "${auth}" -H "accept: application/json" \
+    -F "apiDefinition=${swagger_definition}")
+if [[ $swagger_status -lt 200 || $swagger_status -ge 300 ]]; then
+    echo "Failed to update AI API swagger. HTTP status: ${swagger_status}. Response:"
+    cat "$swagger_response_file"
+    exit 1
+fi
+rm -f "$swagger_response_file"
+
 echo "Updating AI API endpoint security and resource auth"
 api_details=$($curl_command -u "${auth}" "${base_https_url}/api/am/publisher/v4/apis/${api_id}")
 updated_api=$(echo "$api_details" | jq \
