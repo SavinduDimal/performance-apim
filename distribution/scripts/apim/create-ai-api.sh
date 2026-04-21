@@ -87,6 +87,49 @@ api_display_name="${api_name}API"
 api_context="${api_name}"
 curl_command="curl -sk"
 
+function update_unauthenticated_subscription_policy() {
+    echo "Updating Unauthenticated subscription throttling policy"
+    local policies_response
+    policies_response=$($curl_command -u "${auth}" \
+        -H "accept: application/json" \
+        "${base_https_url}/api/am/admin/v4/throttling/policies/subscription")
+
+    local policy_id
+    policy_id=$(echo "$policies_response" | jq -r '.list[] | select(.policyName=="Unauthenticated") | .policyId')
+    if [[ -z $policy_id || $policy_id == "null" ]]; then
+        echo "Could not find the Unauthenticated subscription throttling policy."
+        exit 1
+    fi
+
+    local updated_policy
+    updated_policy=$(echo "$policies_response" | jq \
+        '.list[] | select(.policyName=="Unauthenticated")
+        | .description = "Allows unlimited request(s) per minute"
+        | .defaultLimit.type = "REQUESTCOUNTLIMIT"
+        | .defaultLimit.requestCount.timeUnit = "min"
+        | .defaultLimit.requestCount.unitTime = 1
+        | .defaultLimit.requestCount.requestCount = 2147483647
+        | .defaultLimit.bandwidth = null
+        | .defaultLimit.eventCount = null
+        | .defaultLimit.aiApiQuota = null')
+
+    local update_response_file="/tmp/update-unauthenticated-policy-response-$$.json"
+    local update_status
+    update_status=$($curl_command -w "%{http_code}" -o "$update_response_file" \
+        -u "${auth}" -X PUT \
+        -H "Content-Type: application/json" \
+        -d "$updated_policy" \
+        "${base_https_url}/api/am/admin/v4/throttling/policies/subscription/${policy_id}")
+    if [[ $update_status -lt 200 || $update_status -ge 300 ]]; then
+        echo "Failed to update the Unauthenticated subscription throttling policy. HTTP status: ${update_status}. Response:"
+        cat "$update_response_file"
+        exit 1
+    fi
+    rm -f "$update_response_file"
+}
+
+update_unauthenticated_subscription_policy
+
 echo "Fetching MistralAI LLM provider ID"
 llm_provider_id=$($curl_command "${base_https_url}/api/am/publisher/v4/ai-service-providers" \
     -u "${auth}" -H "accept: application/json" \
