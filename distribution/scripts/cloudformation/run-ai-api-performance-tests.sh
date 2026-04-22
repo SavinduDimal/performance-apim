@@ -119,6 +119,32 @@ function get_test_metadata() {
 }
 export -f get_test_metadata
 
+function get_create_csv_args() {
+    cat <<EOF
+-c
+Heap Size
+-r
+([0-9]+[a-zA-Z])_heap
+-c
+Concurrent Users
+-r
+([0-9]+)_users
+-c
+Message Size (Bytes)
+-r
+([0-9]+)B
+-c
+Response Size (Bytes)
+-r
+([0-9]+)B_response
+-c
+Back-end Service Delay (ms)
+-r
+([0-9]+)ms_sleep
+EOF
+}
+export -f get_create_csv_args
+
 function get_cf_parameters() {
     echo "WSO2APIManagerDistributionName=$wso2am_distribution_filename"
     echo "JDK11DistributionName=$jdk11_distribution_filename"
@@ -135,6 +161,7 @@ function get_columns() {
     echo "Heap Size"
     echo "Concurrent Users"
     echo "Message Size (Bytes)"
+    echo "Response Size (Bytes)"
     echo "Back-end Service Delay (ms)"
     echo "Error %"
     echo "Throughput (Requests/sec)"

@@ -86,6 +86,135 @@ base_https_url="https://${apim_host}:9443"
 api_display_name="${api_name}API"
 api_context="${api_name}"
 curl_command="curl -sk"
+pii_guardrail_policy_name="PIIMaskingRegex"
+default_pii_guardrail_policy_id="ce1b18d2-a144-4d40-a22e-bb3ebcf3df1f"
+target_dir="$script_dir/target"
+mkdir -p "$target_dir"
+
+client_request() {
+    cat <<EOF
+{
+    "callbackUrl": "wso2.org",
+    "clientName": "setup_ai_apim_script",
+    "tokenScope": "Production",
+    "owner": "admin",
+    "grantType": "password refresh_token",
+    "saasApp": true
+}
+EOF
+}
+
+app_request() {
+    cat <<EOF
+{
+   "name":"PerformanceTestAPP",
+   "throttlingPolicy":"Unlimited",
+   "description":"PerformanceTestAPP",
+   "tokenType":"JWT",
+   "attributes":{}
+}
+EOF
+}
+
+generate_keys_request() {
+    cat <<EOF
+{
+   "keyType":"PRODUCTION",
+   "grantTypesToBeSupported":[
+      "refresh_token",
+      "password",
+      "client_credentials",
+      "urn:ietf:params:oauth:grant-type:jwt-bearer"
+   ],
+   "callbackUrl":"wso2.org"
+}
+EOF
+}
+
+subscription_request() {
+    cat <<EOF
+{
+   "apiId":"$1",
+   "applicationId":"$application_id",
+   "throttlingPolicy":"Unlimited"
+}
+EOF
+}
+
+client_credentials=$($curl_command -u admin:admin -H "Content-Type: application/json" \
+    -d "$(client_request)" "${base_https_url}/client-registration/v0.17/register" \
+    | jq -r '.clientId + ":" + .clientSecret')
+
+get_access_token() {
+    local access_token
+    access_token=$($curl_command -d "grant_type=password&username=admin&password=admin&scope=apim:$1" \
+        -u "$client_credentials" "${base_https_url}/oauth2/token" | jq -r '.access_token')
+    echo "$access_token"
+}
+
+get_admin_access_token() {
+    local access_token
+    access_token=$($curl_command -d "grant_type=password&username=admin&password=admin&scope=apim:admin+apim:api_create+apim:api_delete+apim:api_generate_key+apim:api_import_export+apim:api_product_import_export+apim:api_publish+apim:api_view+apim:app_import_export+apim:app_manage+apim:subscribe+apim:sub_manage+apim:subscription_block+apim:subscription_view+apim:mediation_policy_create+apim:mediation_policy_manage+apim:mediation_policy_view+apim:common_operation_policy_manage+apim:publisher_settings+apim:shared_scope_manage+apim:threat_protection_policy_create+apim:threat_protection_policy_manage+openid+service_catalog:service_view+service_catalog:service_write" \
+        -u "$client_credentials" "${base_https_url}/oauth2/token" | jq -r '.access_token')
+    echo "$access_token"
+}
+
+view_access_token=$(get_access_token api_view)
+create_access_token=$(get_access_token api_create)
+publish_access_token=$(get_access_token api_publish)
+subscribe_access_token=$(get_access_token subscribe)
+app_access_token=$(get_access_token app_manage)
+sub_manage_token=$(get_access_token sub_manage)
+admin_token=$(get_admin_access_token)
+
+function ensure_performance_app_and_keys() {
+    echo "Getting PerformanceTestAPP ID"
+    application_id=$($curl_command -H "Authorization: Bearer $subscribe_access_token" \
+        "${base_https_url}/api/am/devportal/v3/applications?query=PerformanceTestAPP" | jq -r '.list[0] | .applicationId')
+
+    if [[ -z $application_id || $application_id == "null" ]]; then
+        echo "Creating PerformanceTestAPP application"
+        application_id=$($curl_command -X POST -H "Authorization: Bearer $app_access_token" \
+            -H "Content-Type: application/json" -d "$(app_request)" \
+            "${base_https_url}/api/am/devportal/applications" | jq -r '.applicationId')
+    fi
+
+    if [[ -z $application_id || $application_id == "null" ]]; then
+        echo "Failed to find or create PerformanceTestAPP."
+        exit 1
+    fi
+    echo "$application_id" >"$target_dir/application_id"
+
+    echo "Finding Consumer Key for PerformanceTestAPP"
+    keys_response=$($curl_command -H "Authorization: Bearer $subscribe_access_token" \
+        "${base_https_url}/api/am/devportal/v3/applications/$application_id/keys/PRODUCTION")
+    consumer_key=$(echo "$keys_response" | jq -r '.consumerKey')
+    if [[ -z $consumer_key || $consumer_key == "null" ]]; then
+        keys_response=$($curl_command -H "Authorization: Bearer $app_access_token" \
+            -H "Content-Type: application/json" -d "$(generate_keys_request)" \
+            "${base_https_url}/api/am/devportal/v3/applications/$application_id/generate-keys")
+        consumer_key=$(echo "$keys_response" | jq -r '.consumerKey')
+    fi
+    if [[ -z $consumer_key || $consumer_key == "null" ]]; then
+        echo "Failed to generate keys for PerformanceTestAPP."
+        exit 1
+    fi
+    echo "$consumer_key" >"$target_dir/consumer_key"
+}
+
+function get_pii_guardrail_policy_id() {
+    local policy_response
+    local policy_id
+
+    policy_response=$($curl_command -H "Authorization: Bearer $admin_token" -H "accept: application/json" \
+        "${base_https_url}/api/am/publisher/v4/api-policies?query=name:${pii_guardrail_policy_name}" || true)
+    policy_id=$(echo "$policy_response" | jq -r '.list[0].id // .list[0].policyId // empty' 2>/dev/null || true)
+    if [[ -z $policy_id ]]; then
+        policy_id="$default_pii_guardrail_policy_id"
+        echo "Falling back to default ${pii_guardrail_policy_name} policy id: ${policy_id}"
+    fi
+    echo "$policy_id"
+}
 
 function update_unauthenticated_subscription_policy() {
     echo "Updating Unauthenticated subscription throttling policy"
@@ -129,6 +258,8 @@ function update_unauthenticated_subscription_policy() {
 }
 
 update_unauthenticated_subscription_policy
+ensure_performance_app_and_keys
+pii_guardrail_policy_id=$(get_pii_guardrail_policy_id)
 
 echo "Fetching MistralAI LLM provider ID"
 llm_provider_id=$($curl_command "${base_https_url}/api/am/publisher/v4/ai-service-providers" \
@@ -140,21 +271,28 @@ if [[ -z $llm_provider_id || $llm_provider_id == "null" ]]; then
     exit 1
 fi
 
-existing_api_id=$($curl_command -u "${auth}" \
+existing_api_id=$($curl_command -H "Authorization: Bearer $view_access_token" \
     "${base_https_url}/api/am/publisher/v4/apis?query=name:${api_display_name}\$" | jq -r '.list[0] | .id')
 
 if [[ -n $existing_api_id && $existing_api_id != "null" ]]; then
+    existing_subscription_id=$($curl_command -H "Authorization: Bearer $subscribe_access_token" \
+        "${base_https_url}/api/am/devportal/v3/subscriptions?apiId=$existing_api_id" | jq -r '.list[0] | .subscriptionId')
+    if [[ -n $existing_subscription_id && $existing_subscription_id != "null" ]]; then
+        echo "Deleting existing subscription ${existing_subscription_id} for ${api_display_name}"
+        $curl_command -w "%{http_code}" -o /dev/null -H "Authorization: Bearer $subscribe_access_token" -X DELETE \
+            "${base_https_url}/api/am/devportal/v3/subscriptions/${existing_subscription_id}"
+    fi
     echo "Deleting existing ${api_display_name} API with ID ${existing_api_id}"
-    $curl_command -w "%{http_code}" -o /dev/null -u "${auth}" -X DELETE \
+    $curl_command -w "%{http_code}" -o /dev/null -H "Authorization: Bearer $create_access_token" -X DELETE \
         "${base_https_url}/api/am/publisher/v4/apis/${existing_api_id}"
 fi
 
 echo "Importing OpenAPI definition for ${api_display_name} from ${openapi_file}"
 create_response=$($curl_command -X POST "${base_https_url}/api/am/publisher/v4/apis/import-openapi" \
-    -u "${auth}" \
+    -H "Authorization: Bearer $create_access_token" \
     -H "accept: application/json" \
     -F "inlineAPIDefinition=<${openapi_file}" \
-    -F 'additionalProperties={"name":"'"${api_display_name}"'","version":"'"${api_version}"'","context":"'"${api_context}"'","gatewayType":"wso2/synapse","policies":["Unlimited"],"subtypeConfiguration":{"subtype":"AIAPI","configuration":{"llmProviderId":"'"${llm_provider_id}"'"}},"securityScheme":["api_key"],"egress":true,"endpointConfig":{"endpoint_type":"http","production_endpoints":{"url":"'"${backend_endpoint_url}"'"}}}')
+    -F 'additionalProperties={"name":"'"${api_display_name}"'","version":"'"${api_version}"'","context":"'"${api_context}"'","gatewayType":"wso2/synapse","policies":["Unlimited"],"subtypeConfiguration":{"subtype":"AIAPI","configuration":{"llmProviderId":"'"${llm_provider_id}"'"}},"securityScheme":["api_key","oauth_basic_auth_api_key_mandatory","oauth2"],"egress":true,"endpointConfig":{"endpoint_type":"http","production_endpoints":{"url":"'"${backend_endpoint_url}"'"}}}')
 
 api_id=$(echo "$create_response" | jq -r '.id')
 if [[ -z $api_id || $api_id == "null" ]]; then
@@ -223,7 +361,7 @@ swagger_definition=$(jq -nc \
 swagger_response_file="/tmp/create-ai-api-swagger-response-$$.json"
 swagger_status=$($curl_command -w "%{http_code}" -o "$swagger_response_file" \
     -X PUT "${base_https_url}/api/am/publisher/v4/apis/${api_id}/swagger" \
-    -u "${auth}" -H "accept: application/json" \
+    -H "Authorization: Bearer $admin_token" -H "accept: application/json" \
     -F "apiDefinition=${swagger_definition}")
 if [[ $swagger_status -lt 200 || $swagger_status -ge 300 ]]; then
     echo "Failed to update AI API swagger. HTTP status: ${swagger_status}. Response:"
@@ -233,10 +371,12 @@ fi
 rm -f "$swagger_response_file"
 
 echo "Updating AI API endpoint security and resource auth"
-api_details=$($curl_command -u "${auth}" "${base_https_url}/api/am/publisher/v4/apis/${api_id}")
+api_details=$($curl_command -H "Authorization: Bearer $view_access_token" "${base_https_url}/api/am/publisher/v4/apis/${api_id}")
 updated_api=$(echo "$api_details" | jq \
     --arg backend "$backend_endpoint_url" \
     --arg llm_provider_id "$llm_provider_id" \
+    --arg pii_guardrail_policy_id "$pii_guardrail_policy_id" \
+    --arg pii_entities '[{"piiEntity":"EMAIL","piiRegex":"([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\\\.[a-zA-Z0-9_-]+)"}]' \
     '.endpointConfig = {
         "endpoint_type":"http",
         "production_endpoints":{"url":$backend},
@@ -245,7 +385,7 @@ updated_api=$(echo "$api_details" | jq \
             "enabled":true,
             "type":"apikey",
             "apiKeyIdentifier":"Authorization",
-            "apiKeyValue":"Bearer abc",
+            "apiKeyValue":"",
             "apiKeyIdentifierType":"HEADER",
             "username":"",
             "password":null,
@@ -253,19 +393,26 @@ updated_api=$(echo "$api_details" | jq \
             "tokenUrl":"",
             "clientId":null,
             "clientSecret":null,
+            "secretKey":null,
+            "accessKey":null,
+            "service":null,
+            "region":null,
+            "uniqueIdentifier":null,
             "customParameters":{},
+            "additionalProperties":{},
             "connectionTimeoutDuration":-1,
             "connectionRequestTimeoutDuration":-1,
             "socketTimeoutDuration":-1,
             "connectionTimeoutConfigType":"GLOBAL",
             "proxyConfigType":"GLOBAL",
             "proxyConfigs":{
-              "proxyEnabled":"",
+              "proxyEnabled":false,
               "proxyHost":"",
               "proxyPort":"",
               "proxyUsername":"",
               "proxyPassword":"",
-              "proxyProtocol":""
+              "proxyProtocol":"",
+              "proxyPasswordAlias":null
             }
           }
         }
@@ -278,7 +425,34 @@ updated_api=$(echo "$api_details" | jq \
           "scopes":[],
           "operationPolicies":{"request":[],"response":[],"fault":[]}
         }]
-      | .securityScheme = ["api_key"]
+      | .authorizationHeader = "Authorization"
+      | .apiKeyHeader = "ApiKey"
+      | .securityScheme = ["api_key","oauth_basic_auth_api_key_mandatory","oauth2"]
+      | .apiPolicies = {
+          "request":[{
+            "policyName":"PIIMaskingRegex",
+            "policyId":$pii_guardrail_policy_id,
+            "policyVersion":"v1.0",
+            "parameters":{
+              "name":"Mask Email PII",
+              "piiEntities":$pii_entities,
+              "jsonPath":"$.messages[-1].content",
+              "redact":"false"
+            }
+          }],
+          "response":[{
+            "policyName":"PIIMaskingRegex",
+            "policyId":$pii_guardrail_policy_id,
+            "policyVersion":"v1.0",
+            "parameters":{
+              "name":"Mask Email PII",
+              "piiEntities":$pii_entities,
+              "jsonPath":"$.choices[0].message.content",
+              "redact":"false"
+            }
+          }],
+          "fault":[]
+        }
       | .subtypeConfiguration = {
           "subtype":"AIAPI",
           "configuration":("{\"llmProviderId\":\"" + $llm_provider_id + "\",\"llmProviderName\":\"MistralAI\",\"llmProviderApiVersion\":\"1.0.0\"}")
@@ -286,11 +460,11 @@ updated_api=$(echo "$api_details" | jq \
       | .egress = true')
 
 $curl_command -X PUT "${base_https_url}/api/am/publisher/v4/apis/${api_id}" \
-    -u "${auth}" -H "Content-Type: application/json" -d "$updated_api" >/dev/null
+    -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" -d "$updated_api" >/dev/null
 
 echo "Creating and deploying AI API revision"
 revision_response=$($curl_command -X POST "${base_https_url}/api/am/publisher/v4/apis/${api_id}/revisions" \
-    -u "${auth}" -H "Content-Type: application/json" -d '{"description":"AI API performance test revision"}')
+    -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" -d '{"description":"AI API performance test revision"}')
 revision_id=$(echo "$revision_response" | jq -r '.id')
 if [[ -z $revision_id || $revision_id == "null" ]]; then
     echo "Failed to create AI API revision. Response:"
@@ -299,14 +473,22 @@ if [[ -z $revision_id || $revision_id == "null" ]]; then
 fi
 
 $curl_command -X POST "${base_https_url}/api/am/publisher/v4/apis/${api_id}/deploy-revision?revisionId=${revision_id}" \
-    -u "${auth}" -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
     -d '[{"name":"Default","vhost":"localhost","displayOnDevportal":true}]' >/dev/null
 
 echo "Publishing ${api_display_name}"
-publish_status=$($curl_command -w "%{http_code}" -o /dev/null -u "${auth}" -X POST \
+publish_status=$($curl_command -w "%{http_code}" -o /dev/null -H "Authorization: Bearer $publish_access_token" -X POST \
     "${base_https_url}/api/am/publisher/v4/apis/change-lifecycle?action=Publish&apiId=${api_id}")
 if [[ $publish_status -ne 200 ]]; then
     echo "Failed to publish ${api_display_name}. HTTP status: ${publish_status}"
+    exit 1
+fi
+
+echo "Subscribing ${api_display_name} to PerformanceTestAPP"
+subscription_id=$($curl_command -H "Authorization: Bearer $sub_manage_token" -H "Content-Type: application/json" \
+    -d "$(subscription_request "$api_id")" "${base_https_url}/api/am/devportal/v3/subscriptions" | jq -r '.subscriptionId')
+if [[ -z $subscription_id || $subscription_id == "null" ]]; then
+    echo "Failed to subscribe ${api_display_name} to PerformanceTestAPP."
     exit 1
 fi
 
