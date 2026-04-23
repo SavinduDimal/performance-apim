@@ -168,8 +168,8 @@ function get_columns() {
     echo "Average Response Time (ms)"
     echo "Standard Deviation of Response Time (ms)"
     echo "99th Percentile of Response Time (ms)"
-    echo "WSO2 API Manager GC Throughput (%)"
-    echo "Average WSO2 API Manager Memory Footprint After Full GC (M)"
+    echo "WSO2 API Manager AI API GC Throughput (%)"
+    echo "Average WSO2 API Manager AI API Memory Footprint After Full GC (M)"
 }
 export -f get_columns
 
