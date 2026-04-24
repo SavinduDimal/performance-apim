@@ -221,7 +221,8 @@ function get_operation_policy_id() {
 
     policy_response=$($curl_command -H "Authorization: Bearer $admin_token" -H "accept: application/json" \
         "${base_https_url}/api/am/publisher/v4/operation-policies?query=name%3A${policy_name}" || true)
-    policy_id=$(echo "$policy_response" | jq -r '.list[0].id // .list[0].policyId // empty' 2>/dev/null || true)
+    policy_id=$(echo "$policy_response" | jq -r --arg policy_name "$policy_name" \
+        '.list[] | select(.name == $policy_name) | .id // .policyId' 2>/dev/null | head -n 1 || true)
     if [[ -z $policy_id ]]; then
         echo "Could not find operation policy ID for ${policy_name}." >&2
         echo "Response: ${policy_response}" >&2
@@ -230,11 +231,37 @@ function get_operation_policy_id() {
     echo "$policy_id"
 }
 
+function get_pii_entities_param() {
+    cat <<'EOF'
+[
+    {
+        &quot;piiEntity&quot;: &quot;EMAIL&quot;,
+        &quot;piiRegex&quot;: &quot;([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\.[a-zA-Z0-9_-]+)&quot;
+    }
+]
+
+EOF
+}
+
+function get_json_schema_param() {
+    cat <<'EOF'
+{
+  &quot;$schema&quot;: &quot;http://json-schema.org/draft-07/schema#&quot;,
+  &quot;type&quot;: &quot;object&quot;
+}
+EOF
+}
+
 function build_api_policies_json() {
     local mode="$1"
     local pii_policy_id="$2"
     local url_policy_id="$3"
     local json_schema_policy_id="$4"
+    local pii_entities
+    local json_schema
+
+    pii_entities=$(get_pii_entities_param)
+    json_schema=$(get_json_schema_param)
 
     case "$mode" in
     no_guardrails)
@@ -243,13 +270,12 @@ function build_api_policies_json() {
     pii_masking)
         jq -nc \
             --arg pii_policy_id "$pii_policy_id" \
-            --arg pii_entities '[{"piiEntity":"EMAIL","piiRegex":"([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\\\.[a-zA-Z0-9_-]+)"}]' \
+            --arg pii_entities "$pii_entities" \
             '{
               "request":[{
                 "policyName":"PIIMaskingRegex",
                 "policyId":$pii_policy_id,
                 "policyVersion":"v1.0",
-                "policyType":"common",
                 "parameters":{
                   "name":"Mask Email PII",
                   "piiEntities":$pii_entities,
@@ -261,7 +287,6 @@ function build_api_policies_json() {
                 "policyName":"PIIMaskingRegex",
                 "policyId":$pii_policy_id,
                 "policyVersion":"v1.0",
-                "policyType":"common",
                 "parameters":{
                   "name":"Mask Email PII",
                   "piiEntities":$pii_entities,
@@ -277,15 +302,14 @@ function build_api_policies_json() {
             --arg pii_policy_id "$pii_policy_id" \
             --arg url_policy_id "$url_policy_id" \
             --arg json_schema_policy_id "$json_schema_policy_id" \
-            --arg pii_entities '[{"piiEntity":"EMAIL","piiRegex":"([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\\\.[a-zA-Z0-9_-]+)"}]' \
-            --arg schema '{"$schema":"http://json-schema.org/draft-07/schema#","type":"object"}' \
+            --arg pii_entities "$pii_entities" \
+            --arg schema "$json_schema" \
             '{
               "request":[
                 {
                   "policyName":"PIIMaskingRegex",
                   "policyId":$pii_policy_id,
                   "policyVersion":"v1.0",
-                  "policyType":"common",
                   "parameters":{
                     "name":"Mask Email PII",
                     "piiEntities":$pii_entities,
@@ -294,27 +318,27 @@ function build_api_policies_json() {
                   }
                 },
                 {
-                  "policyName":"JSONSchemaGuardrail",
-                  "policyId":$json_schema_policy_id,
-                  "policyVersion":"v1.0",
-                  "policyType":"common",
-                  "parameters":{
-                    "name":"JSON Schema Guardrail",
-                    "schema":$schema,
-                    "showAssessment":true
-                  }
-                },
-                {
                   "policyName":"URLGuardrail",
                   "policyId":$url_policy_id,
                   "policyVersion":"v1.0",
-                  "policyType":"common",
                   "parameters":{
                     "name":"URL Safety Guard",
-                    "showAssessment":"false",
                     "jsonPath":"$.messages[-1].content",
+                    "onlyDNS":"false",
                     "timeout":"3000",
-                    "onlyDNS":"false"
+                    "showAssessment":"false"
+                  }
+                },
+                {
+                  "policyName":"JSONSchemaGuardrail",
+                  "policyId":$json_schema_policy_id,
+                  "policyVersion":"v1.0",
+                  "parameters":{
+                    "name":"JSON Schema Guardrail",
+                    "schema":$schema,
+                    "jsonPath":null,
+                    "invert":null,
+                    "showAssessment":true
                   }
                 }
               ],
@@ -322,7 +346,6 @@ function build_api_policies_json() {
                 "policyName":"PIIMaskingRegex",
                 "policyId":$pii_policy_id,
                 "policyVersion":"v1.0",
-                "policyType":"common",
                 "parameters":{
                   "name":"Mask Email PII",
                   "piiEntities":$pii_entities,
@@ -332,6 +355,44 @@ function build_api_policies_json() {
               }],
               "fault":[]
             }'
+        ;;
+    esac
+}
+
+function validate_api_mode_configuration() {
+    local mode="$1"
+    local api_response="$2"
+    local auth_type
+    local request_policy_count
+    local response_policy_count
+
+    auth_type=$(echo "$api_response" | jq -r '.operations[0].authType // empty')
+    request_policy_count=$(echo "$api_response" | jq -r '.apiPolicies.request | length')
+    response_policy_count=$(echo "$api_response" | jq -r '.apiPolicies.response | length')
+
+    if [[ $auth_type != "Application & Application User" ]]; then
+        echo "Unexpected authType for ${api_display_name}: ${auth_type}"
+        exit 1
+    fi
+
+    case "$mode" in
+    no_guardrails)
+        [[ $request_policy_count -eq 0 && $response_policy_count -eq 0 ]] || {
+            echo "Unexpected guardrail configuration for ${api_display_name} in no_guardrails mode."
+            exit 1
+        }
+        ;;
+    pii_masking)
+        [[ $request_policy_count -eq 1 && $response_policy_count -eq 1 ]] || {
+            echo "Unexpected guardrail configuration for ${api_display_name} in pii_masking mode."
+            exit 1
+        }
+        ;;
+    advanced_guardrails)
+        [[ $request_policy_count -eq 3 && $response_policy_count -eq 1 ]] || {
+            echo "Unexpected guardrail configuration for ${api_display_name} in advanced_guardrails mode."
+            exit 1
+        }
         ;;
     esac
 }
@@ -514,7 +575,7 @@ updated_api=$(echo "$api_details" | jq \
             "enabled":true,
             "type":"apikey",
             "apiKeyIdentifier":"Authorization",
-            "apiKeyValue":"",
+            "apiKeyValue":"Bearer abc",
             "apiKeyIdentifierType":"HEADER",
             "username":"",
             "password":null,
@@ -564,8 +625,18 @@ updated_api=$(echo "$api_details" | jq \
         }
       | .egress = true')
 
-$curl_command -X PUT "${base_https_url}/api/am/publisher/v4/apis/${api_id}" \
-    -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" -d "$updated_api" >/dev/null
+api_update_response_file="/tmp/create-ai-api-update-response-$$.json"
+api_update_status=$($curl_command -w "%{http_code}" -o "$api_update_response_file" \
+    -X PUT "${base_https_url}/api/am/publisher/v4/apis/${api_id}" \
+    -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" -d "$updated_api")
+if [[ $api_update_status -lt 200 || $api_update_status -ge 300 ]]; then
+    echo "Failed to update AI API definition. HTTP status: ${api_update_status}. Response:"
+    cat "$api_update_response_file"
+    exit 1
+fi
+updated_api_response=$(cat "$api_update_response_file")
+rm -f "$api_update_response_file"
+validate_api_mode_configuration "$api_mode" "$updated_api_response"
 
 echo "Creating and deploying AI API revision"
 revision_response=$($curl_command -X POST "${base_https_url}/api/am/publisher/v4/apis/${api_id}/revisions" \
@@ -577,9 +648,17 @@ if [[ -z $revision_id || $revision_id == "null" ]]; then
     exit 1
 fi
 
-$curl_command -X POST "${base_https_url}/api/am/publisher/v4/apis/${api_id}/deploy-revision?revisionId=${revision_id}" \
+deploy_response_file="/tmp/create-ai-api-deploy-response-$$.json"
+deploy_status=$($curl_command -w "%{http_code}" -o "$deploy_response_file" \
+    -X POST "${base_https_url}/api/am/publisher/v4/apis/${api_id}/deploy-revision?revisionId=${revision_id}" \
     -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
-    -d '[{"name":"Default","vhost":"localhost","displayOnDevportal":true}]' >/dev/null
+    -d '[{"name":"Default","vhost":"localhost","displayOnDevportal":true}]')
+if [[ $deploy_status -lt 200 || $deploy_status -ge 300 ]]; then
+    echo "Failed to deploy AI API revision. HTTP status: ${deploy_status}. Response:"
+    cat "$deploy_response_file"
+    exit 1
+fi
+rm -f "$deploy_response_file"
 
 echo "Publishing ${api_display_name}"
 publish_status=$($curl_command -w "%{http_code}" -o /dev/null -H "Authorization: Bearer $publish_access_token" -X POST \
@@ -596,5 +675,10 @@ if [[ -z $subscription_id || $subscription_id == "null" ]]; then
     echo "Failed to subscribe ${api_display_name} to PerformanceTestAPP."
     exit 1
 fi
+
+final_api_response=$($curl_command -H "Authorization: Bearer $view_access_token" \
+    "${base_https_url}/api/am/publisher/v4/apis/${api_id}")
+validate_api_mode_configuration "$api_mode" "$final_api_response"
+echo "$final_api_response" >"$target_dir/${api_name}-api.json"
 
 echo "Created AI API ${api_display_name} (${api_id}) at /${api_context}/${api_version}/v1/chat/completions"

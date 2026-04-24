@@ -10,7 +10,7 @@ export PAYLOAD_GENERATOR_ARGS="-a"
 jwt_tokens_file_name="jwt-tokens.csv"
 jwt_tokens_count=4000
 
-echo "#### Current git change version: performance-apim: v1 ####"
+echo "#### Current git change version: performance-apim: v2 ####"
 
 . $script_dir/perf-test-common.sh
 
