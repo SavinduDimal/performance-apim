@@ -13,22 +13,25 @@ backend_endpoint_url=""
 api_version="1.0.0"
 auth="admin:admin"
 openapi_file="$script_dir/payload/mistral_api.yaml"
+api_mode="pii_masking"
+default_api_mode="$api_mode"
 
 function usage() {
     echo ""
     echo "Usage: "
-    echo "$0 -a <apim_host> -n <api_name> -b <backend_endpoint_url> [-d <api_description>] [-f <openapi_file>] [-h]"
+    echo "$0 -a <apim_host> -n <api_name> -b <backend_endpoint_url> [-d <api_description>] [-f <openapi_file>] [-m <api_mode>] [-h]"
     echo ""
     echo "-a: Hostname of WSO2 API Manager."
     echo "-n: API context/name prefix. The API name will be <api_name>API."
     echo "-b: Mock AI backend endpoint URL."
     echo "-d: API Description."
     echo "-f: OpenAPI file to import. Default: $openapi_file"
+    echo "-m: AI API scenario mode. One of: no_guardrails, pii_masking, advanced_guardrails. Default: $default_api_mode"
     echo "-h: Display this help and exit."
     echo ""
 }
 
-while getopts "a:n:d:b:f:h" opt; do
+while getopts "a:n:d:b:f:m:h" opt; do
     case "${opt}" in
     a)
         apim_host=${OPTARG}
@@ -44,6 +47,9 @@ while getopts "a:n:d:b:f:h" opt; do
         ;;
     f)
         openapi_file=${OPTARG}
+        ;;
+    m)
+        api_mode=${OPTARG}
         ;;
     h)
         usage
@@ -77,6 +83,11 @@ if [[ ! -f $openapi_file ]]; then
     exit 1
 fi
 
+if [[ $api_mode != "no_guardrails" && $api_mode != "pii_masking" && $api_mode != "advanced_guardrails" ]]; then
+    echo "Please provide a valid AI API mode. Supported values: no_guardrails, pii_masking, advanced_guardrails."
+    exit 1
+fi
+
 if ! command -v jq >/dev/null 2>&1; then
     echo "Please install jq."
     exit 1
@@ -87,7 +98,8 @@ api_display_name="${api_name}API"
 api_context="${api_name}"
 curl_command="curl -sk"
 pii_guardrail_policy_name="PIIMaskingRegex"
-default_pii_guardrail_policy_id="ce1b18d2-a144-4d40-a22e-bb3ebcf3df1f"
+url_guardrail_policy_name="URLGuardrail"
+json_schema_guardrail_policy_name="JSONSchemaGuardrail"
 target_dir="$script_dir/target"
 mkdir -p "$target_dir"
 
@@ -202,18 +214,126 @@ function ensure_performance_app_and_keys() {
     echo "$consumer_key" >"$target_dir/consumer_key"
 }
 
-function get_pii_guardrail_policy_id() {
+function get_operation_policy_id() {
+    local policy_name="$1"
     local policy_response
     local policy_id
 
     policy_response=$($curl_command -H "Authorization: Bearer $admin_token" -H "accept: application/json" \
-        "${base_https_url}/api/am/publisher/v4/api-policies?query=name:${pii_guardrail_policy_name}" || true)
+        "${base_https_url}/api/am/publisher/v4/operation-policies?query=name%3A${policy_name}" || true)
     policy_id=$(echo "$policy_response" | jq -r '.list[0].id // .list[0].policyId // empty' 2>/dev/null || true)
     if [[ -z $policy_id ]]; then
-        policy_id="$default_pii_guardrail_policy_id"
-        echo "Falling back to default ${pii_guardrail_policy_name} policy id: ${policy_id}"
+        echo "Could not find operation policy ID for ${policy_name}." >&2
+        echo "Response: ${policy_response}" >&2
+        exit 1
     fi
     echo "$policy_id"
+}
+
+function build_api_policies_json() {
+    local mode="$1"
+    local pii_policy_id="$2"
+    local url_policy_id="$3"
+    local json_schema_policy_id="$4"
+
+    case "$mode" in
+    no_guardrails)
+        jq -nc '{"request":[],"response":[],"fault":[]}'
+        ;;
+    pii_masking)
+        jq -nc \
+            --arg pii_policy_id "$pii_policy_id" \
+            --arg pii_entities '[{"piiEntity":"EMAIL","piiRegex":"([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\\\.[a-zA-Z0-9_-]+)"}]' \
+            '{
+              "request":[{
+                "policyName":"PIIMaskingRegex",
+                "policyId":$pii_policy_id,
+                "policyVersion":"v1.0",
+                "policyType":"common",
+                "parameters":{
+                  "name":"Mask Email PII",
+                  "piiEntities":$pii_entities,
+                  "jsonPath":"$.messages[-1].content",
+                  "redact":"false"
+                }
+              }],
+              "response":[{
+                "policyName":"PIIMaskingRegex",
+                "policyId":$pii_policy_id,
+                "policyVersion":"v1.0",
+                "policyType":"common",
+                "parameters":{
+                  "name":"Mask Email PII",
+                  "piiEntities":$pii_entities,
+                  "jsonPath":"$.choices[0].message.content",
+                  "redact":"false"
+                }
+              }],
+              "fault":[]
+            }'
+        ;;
+    advanced_guardrails)
+        jq -nc \
+            --arg pii_policy_id "$pii_policy_id" \
+            --arg url_policy_id "$url_policy_id" \
+            --arg json_schema_policy_id "$json_schema_policy_id" \
+            --arg pii_entities '[{"piiEntity":"EMAIL","piiRegex":"([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\\\.[a-zA-Z0-9_-]+)"}]' \
+            --arg schema '{"$schema":"http://json-schema.org/draft-07/schema#","type":"object"}' \
+            '{
+              "request":[
+                {
+                  "policyName":"PIIMaskingRegex",
+                  "policyId":$pii_policy_id,
+                  "policyVersion":"v1.0",
+                  "policyType":"common",
+                  "parameters":{
+                    "name":"Mask Email PII",
+                    "piiEntities":$pii_entities,
+                    "jsonPath":"$.messages[-1].content",
+                    "redact":"false"
+                  }
+                },
+                {
+                  "policyName":"JSONSchemaGuardrail",
+                  "policyId":$json_schema_policy_id,
+                  "policyVersion":"v1.0",
+                  "policyType":"common",
+                  "parameters":{
+                    "name":"JSON Schema Guardrail",
+                    "schema":$schema,
+                    "showAssessment":true
+                  }
+                },
+                {
+                  "policyName":"URLGuardrail",
+                  "policyId":$url_policy_id,
+                  "policyVersion":"v1.0",
+                  "policyType":"common",
+                  "parameters":{
+                    "name":"URL Safety Guard",
+                    "showAssessment":"false",
+                    "jsonPath":"$.messages[-1].content",
+                    "timeout":"3000",
+                    "onlyDNS":"false"
+                  }
+                }
+              ],
+              "response":[{
+                "policyName":"PIIMaskingRegex",
+                "policyId":$pii_policy_id,
+                "policyVersion":"v1.0",
+                "policyType":"common",
+                "parameters":{
+                  "name":"Mask Email PII",
+                  "piiEntities":$pii_entities,
+                  "jsonPath":"$.choices[0].message.content",
+                  "redact":"false"
+                }
+              }],
+              "fault":[]
+            }'
+        ;;
+    esac
 }
 
 function update_unauthenticated_subscription_policy() {
@@ -259,7 +379,17 @@ function update_unauthenticated_subscription_policy() {
 
 update_unauthenticated_subscription_policy
 ensure_performance_app_and_keys
-pii_guardrail_policy_id=$(get_pii_guardrail_policy_id)
+pii_guardrail_policy_id=""
+url_guardrail_policy_id=""
+json_schema_guardrail_policy_id=""
+if [[ $api_mode == "pii_masking" || $api_mode == "advanced_guardrails" ]]; then
+    pii_guardrail_policy_id=$(get_operation_policy_id "$pii_guardrail_policy_name")
+fi
+if [[ $api_mode == "advanced_guardrails" ]]; then
+    url_guardrail_policy_id=$(get_operation_policy_id "$url_guardrail_policy_name")
+    json_schema_guardrail_policy_id=$(get_operation_policy_id "$json_schema_guardrail_policy_name")
+fi
+api_policies_json=$(build_api_policies_json "$api_mode" "$pii_guardrail_policy_id" "$url_guardrail_policy_id" "$json_schema_guardrail_policy_id")
 
 echo "Fetching MistralAI LLM provider ID"
 llm_provider_id=$($curl_command "${base_https_url}/api/am/publisher/v4/ai-service-providers" \
@@ -331,7 +461,7 @@ swagger_definition=$(jq -nc \
               }
             },
             "security":[{"default":[]}],
-            "x-auth-type":"None",
+            "x-auth-type":"Application & Application User",
             "x-throttling-tier":"Unlimited",
             "x-wso2-application-security":{"security-types":["api_key"],"optional":false}
           }
@@ -375,8 +505,7 @@ api_details=$($curl_command -H "Authorization: Bearer $view_access_token" "${bas
 updated_api=$(echo "$api_details" | jq \
     --arg backend "$backend_endpoint_url" \
     --arg llm_provider_id "$llm_provider_id" \
-    --arg pii_guardrail_policy_id "$pii_guardrail_policy_id" \
-    --arg pii_entities '[{"piiEntity":"EMAIL","piiRegex":"([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\\\.[a-zA-Z0-9_-]+)"}]' \
+    --argjson api_policies "$api_policies_json" \
     '.endpointConfig = {
         "endpoint_type":"http",
         "production_endpoints":{"url":$backend},
@@ -420,7 +549,7 @@ updated_api=$(echo "$api_details" | jq \
       | .operations = [{
           "target":"/v1/chat/completions",
           "verb":"POST",
-          "authType":"None",
+          "authType":"Application & Application User",
           "throttlingPolicy":"Unlimited",
           "scopes":[],
           "operationPolicies":{"request":[],"response":[],"fault":[]}
@@ -428,31 +557,7 @@ updated_api=$(echo "$api_details" | jq \
       | .authorizationHeader = "Authorization"
       | .apiKeyHeader = "ApiKey"
       | .securityScheme = ["api_key","oauth_basic_auth_api_key_mandatory","oauth2"]
-      | .apiPolicies = {
-          "request":[{
-            "policyName":"PIIMaskingRegex",
-            "policyId":$pii_guardrail_policy_id,
-            "policyVersion":"v1.0",
-            "parameters":{
-              "name":"Mask Email PII",
-              "piiEntities":$pii_entities,
-              "jsonPath":"$.messages[-1].content",
-              "redact":"false"
-            }
-          }],
-          "response":[{
-            "policyName":"PIIMaskingRegex",
-            "policyId":$pii_guardrail_policy_id,
-            "policyVersion":"v1.0",
-            "parameters":{
-              "name":"Mask Email PII",
-              "piiEntities":$pii_entities,
-              "jsonPath":"$.choices[0].message.content",
-              "redact":"false"
-            }
-          }],
-          "fault":[]
-        }
+      | .apiPolicies = $api_policies
       | .subtypeConfiguration = {
           "subtype":"AIAPI",
           "configuration":("{\"llmProviderId\":\"" + $llm_provider_id + "\",\"llmProviderName\":\"MistralAI\",\"llmProviderApiVersion\":\"1.0.0\"}")

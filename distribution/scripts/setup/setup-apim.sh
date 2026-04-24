@@ -171,10 +171,16 @@ function setup() {
     # Start API Manager
     sudo -u $os_user $script_dir/../apim/apim-start.sh -m 1G
 
-    # Create the AI API used by the performance test. The API resource has auth disabled,
-    # so token generation and application subscription are intentionally skipped.
+    # Create the AI APIs used by the performance tests.
+    sudo -u $os_user $script_dir/../apim/create-ai-api.sh -a localhost -n "aiapi-auth" \
+        -d "AI API Performance Test API - Auth No Guardrails" -b "http://${netty_host}:3000" \
+        -m "no_guardrails"
     sudo -u $os_user $script_dir/../apim/create-ai-api.sh -a localhost -n "aiapi" \
-        -d "AI API Performance Test API" -b "http://${netty_host}:3000"
+        -d "AI API Performance Test API - PII Masking" -b "http://${netty_host}:3000" \
+        -m "pii_masking"
+    sudo -u $os_user $script_dir/../apim/create-ai-api.sh -a localhost -n "aiapi-advanced" \
+        -d "AI API Performance Test API - Advanced Guardrails" -b "http://${netty_host}:3000" \
+        -m "advanced_guardrails"
 
     popd
     echo "Completed API Manager setup..."
