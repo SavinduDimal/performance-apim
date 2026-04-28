@@ -10,7 +10,7 @@ export PAYLOAD_GENERATOR_ARGS="-a"
 jwt_tokens_file_name="jwt-tokens.csv"
 jwt_tokens_count=4000
 
-echo "#### Current git change version: performance-apim: v2 ####"
+echo "#### Current git change version: performance-apim: v4 ####"
 
 . $script_dir/perf-test-common.sh
 
@@ -48,7 +48,7 @@ declare -A test_scenario0=(
 declare -A test_scenario1=(
     [name]="ai_api_auth_no_guardrails"
     [display_name]="AI API Auth No Guardrails"
-    [description]="AI API invocation through the API gateway with authentication enabled and no guardrails."
+    [description]="AI API invocation through the API gateway with OAuth2 authentication enabled and no guardrails."
     [jmx]="ai-api-test.jmx"
     [protocol]="https"
     [path]="/aiapi-auth/1.0.0/v1/chat/completions"
@@ -60,6 +60,20 @@ declare -A test_scenario1=(
     [skip]=false
 )
 declare -A test_scenario2=(
+    [name]="ai_api_request_pii_masking"
+    [display_name]="AI API Request PII Masking"
+    [description]="AI API invocation through the API gateway with authentication and PII masking on the request only."
+    [jmx]="ai-api-test.jmx"
+    [protocol]="https"
+    [path]="/aiapi-request/1.0.0/v1/chat/completions"
+    [host_type]="apim"
+    [port]="8243"
+    [use_apim]=true
+    [use_backend]=true
+    [backend_flags]="--port 3000 --ai-chat-completion-response"
+    [skip]=false
+)
+declare -A test_scenario3=(
     [name]="ai_api_pii_masking"
     [display_name]="AI API PII Masking"
     [description]="AI API invocation through the API gateway with authentication and PII masking on request and response."
@@ -73,7 +87,7 @@ declare -A test_scenario2=(
     [backend_flags]="--port 3000 --ai-chat-completion-response"
     [skip]=false
 )
-declare -A test_scenario3=(
+declare -A test_scenario4=(
     [name]="ai_api_advanced_guardrails"
     [display_name]="AI API Advanced Guardrails"
     [description]="AI API invocation through the API gateway with authentication, request PII masking, URL and JSON schema guardrails, and response PII masking."

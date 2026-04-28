@@ -8,6 +8,12 @@ During each release, we execute various automated performance test scenarios and
 | {{test_scenario.display_name}} | {{test_scenario.description}} |
 {%- endfor %}
 
+The direct back-end scenario is included as the baseline for comparing the additional gateway features exercised by the
+other scenarios. All gateway-based scenarios are executed through the AI API runtime path in WSO2 API Manager with the
+standard API control points in place, including request handling associated with throttling and analytics flows. As a
+result, the reported numbers reflect the end-to-end gateway processing cost of the configured authentication and
+guardrail combination relative to the direct back-end baseline.
+
 Our test client is [Apache JMeter](https://jmeter.apache.org/index.html). We test each scenario for a fixed duration of
 time. We split the test results into warmup and measurement parts and use the measurement part to compute the
 performance metrics.

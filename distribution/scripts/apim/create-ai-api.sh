@@ -26,7 +26,7 @@ function usage() {
     echo "-b: Mock AI backend endpoint URL."
     echo "-d: API Description."
     echo "-f: OpenAPI file to import. Default: $openapi_file"
-    echo "-m: AI API scenario mode. One of: no_guardrails, pii_masking, advanced_guardrails. Default: $default_api_mode"
+    echo "-m: AI API scenario mode. One of: no_guardrails, request_pii_masking, pii_masking, advanced_guardrails. Default: $default_api_mode"
     echo "-h: Display this help and exit."
     echo ""
 }
@@ -83,8 +83,8 @@ if [[ ! -f $openapi_file ]]; then
     exit 1
 fi
 
-if [[ $api_mode != "no_guardrails" && $api_mode != "pii_masking" && $api_mode != "advanced_guardrails" ]]; then
-    echo "Please provide a valid AI API mode. Supported values: no_guardrails, pii_masking, advanced_guardrails."
+if [[ $api_mode != "no_guardrails" && $api_mode != "request_pii_masking" && $api_mode != "pii_masking" && $api_mode != "advanced_guardrails" ]]; then
+    echo "Please provide a valid AI API mode. Supported values: no_guardrails, request_pii_masking, pii_masking, advanced_guardrails."
     exit 1
 fi
 
@@ -267,6 +267,26 @@ function build_api_policies_json() {
     no_guardrails)
         jq -nc '{"request":[],"response":[],"fault":[]}'
         ;;
+    request_pii_masking)
+        jq -nc \
+            --arg pii_policy_id "$pii_policy_id" \
+            --arg pii_entities "$pii_entities" \
+            '{
+              "request":[{
+                "policyName":"PIIMaskingRegex",
+                "policyId":$pii_policy_id,
+                "policyVersion":"v1.0",
+                "parameters":{
+                  "name":"Mask Email PII",
+                  "piiEntities":$pii_entities,
+                  "jsonPath":"$.messages[-1].content",
+                  "redact":"false"
+                }
+              }],
+              "response":[],
+              "fault":[]
+            }'
+        ;;
     pii_masking)
         jq -nc \
             --arg pii_policy_id "$pii_policy_id" \
@@ -382,6 +402,12 @@ function validate_api_mode_configuration() {
             exit 1
         }
         ;;
+    request_pii_masking)
+        [[ $request_policy_count -eq 1 && $response_policy_count -eq 0 ]] || {
+            echo "Unexpected guardrail configuration for ${api_display_name} in request_pii_masking mode."
+            exit 1
+        }
+        ;;
     pii_masking)
         [[ $request_policy_count -eq 1 && $response_policy_count -eq 1 ]] || {
             echo "Unexpected guardrail configuration for ${api_display_name} in pii_masking mode."
@@ -443,7 +469,7 @@ ensure_performance_app_and_keys
 pii_guardrail_policy_id=""
 url_guardrail_policy_id=""
 json_schema_guardrail_policy_id=""
-if [[ $api_mode == "pii_masking" || $api_mode == "advanced_guardrails" ]]; then
+if [[ $api_mode == "request_pii_masking" || $api_mode == "pii_masking" || $api_mode == "advanced_guardrails" ]]; then
     pii_guardrail_policy_id=$(get_operation_policy_id "$pii_guardrail_policy_name")
 fi
 if [[ $api_mode == "advanced_guardrails" ]]; then

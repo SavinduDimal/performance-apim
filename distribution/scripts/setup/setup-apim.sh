@@ -175,6 +175,9 @@ function setup() {
     sudo -u $os_user $script_dir/../apim/create-ai-api.sh -a localhost -n "aiapi-auth" \
         -d "AI API Performance Test API - Auth No Guardrails" -b "http://${netty_host}:3000" \
         -m "no_guardrails"
+    sudo -u $os_user $script_dir/../apim/create-ai-api.sh -a localhost -n "aiapi-request" \
+        -d "AI API Performance Test API - Request PII Masking" -b "http://${netty_host}:3000" \
+        -m "request_pii_masking"
     sudo -u $os_user $script_dir/../apim/create-ai-api.sh -a localhost -n "aiapi" \
         -d "AI API Performance Test API - PII Masking" -b "http://${netty_host}:3000" \
         -m "pii_masking"
